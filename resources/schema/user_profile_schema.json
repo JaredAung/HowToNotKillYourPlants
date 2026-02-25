@@ -1,0 +1,124 @@
+{
+  "$schema": "User profile schema - data collected during onboarding and profile updates",
+  "description": "Schema for user profile documents stored in UserCollection. Used for two-tower matching with plant profiles.",
+  "type": "object",
+  "properties": {
+    "auth": {
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "avatar_url": { "type": ["string", "null"] }
+      }
+    },
+    "location": {
+      "type": "object",
+      "properties": {
+        "city": { "type": ["string", "null"] },
+        "state": { "type": ["string", "null"] },
+        "postal_code": { "type": ["string", "null"] },
+        "country": { "type": ["string", "null"], "default": "US" }
+      }
+    },
+    "climate": {
+      "type": ["string", "null"],
+      "enum": ["Arid Tropical", "Subtropical", "Subtropical arid", "Tropical", "Tropical humid"]
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "light_level": {
+          "type": ["string", "null"],
+          "enum": ["direct", "bright_light", "bright_indirect", "indirect", "diffused"]
+        },
+        "humidity_level": {
+          "type": ["string", "null"],
+          "enum": ["low", "medium", "high"]
+        },
+        "temperature_pref": {
+          "type": "object",
+          "properties": {
+            "min_f": { "type": ["number", "null"], "description": "Min preferred temp in Fahrenheit" },
+            "max_f": { "type": ["number", "null"], "description": "Max preferred temp in Fahrenheit" }
+          }
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "has_kids": { "type": ["boolean", "null"] }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "preferred_size": {
+          "type": ["string", "null"],
+          "enum": ["small", "medium", "large"],
+          "description": "Maps to plant Info.size for two-tower matching"
+        },
+        "hard_no": {
+          "type": "array",
+          "items": {
+            "enum": ["frequent_watering"]
+          }
+        }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "properties": {
+        "care_level": {
+          "type": ["string", "null"],
+          "enum": ["easy", "medium", "hard"],
+          "description": "Aligned with plant care_level for two-tower matching"
+        },
+        "care_preferences": {
+          "type": "object",
+          "properties": {
+            "watering_freq": {
+              "type": ["string", "null"],
+              "enum": ["low", "medium", "high"]
+            },
+            "care_freq": {
+              "type": ["string", "null"],
+              "enum": ["low", "medium", "high"]
+            }
+          }
+        }
+      }
+    },
+    "gamification": {
+      "type": "object",
+      "properties": {
+        "care_points": { "type": "number" },
+        "care_level": { "type": "number" },
+        "streak_days": { "type": "number" },
+        "multiplier": { "type": "number" },
+        "badges": { "type": "array" }
+      }
+    },
+    "social": {
+      "type": "object",
+      "properties": {
+        "friends": { "type": "array" },
+        "neighborhood_id": { "type": ["string", "null"] }
+      }
+    },
+    "history": {
+      "type": "object",
+      "properties": {
+        "owned_plants_count": { "type": "number" },
+        "deaths_count": { "type": "number" },
+        "average_health_score": { "type": "number" },
+        "last_death_reason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

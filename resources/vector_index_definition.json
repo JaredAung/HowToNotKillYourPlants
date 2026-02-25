@@ -1,0 +1,10 @@
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "plant_tower_embedding",
+      "numDimensions": 64,
+      "similarity": "dotProduct"
+    }
+  ]
+}

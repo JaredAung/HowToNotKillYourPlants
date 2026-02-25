@@ -1,0 +1,49 @@
+============================================================
+PLANT PROFILE SCHEMA (extracted from plant_profiles.json)
+============================================================
+
+plant_id: int
+img_url: string | null
+
+Info:
+  latin: string | null
+  common_name: string | null
+  category: ENUM(Aglaonema, Anthurium, Aralia, Bromeliad, Cactus And Succulent, Dieffenbachia, Dracaena, Fern, Ficus, Flower, Foliage plant, Grass, Hanging, Other, Palm, Philodendron, Sansevieria, Schefflera, Spathiphyllum)
+  origin: string | null
+  size: ENUM(small, medium, large)   # maps to user constraints.preferred_size
+  desc:
+    physical_desc: string | null
+    symbolism: string | null
+  growth_rate: ENUM(moderate)
+
+Care:
+  water_req: string | null
+  water_req_bucket: ENUM(high, medium, low)
+  light_req:
+    ideal_light:
+      sunlight_type: string | null
+      sunlight_bucket: ENUM(direct, bright_light, bright_indirect, indirect, diffused)
+      duration: string | null
+    tolerated_light:
+      sunlight_type: string | null
+      sunlight_bucket: ENUM(direct, bright_light, bright_indirect, indirect, diffused)
+      duration: string | null
+  humidity_req: string | null
+  humidity_req_bucket: ENUM(low, medium, high)
+  temp_req:
+    min_temp: float | null   # Fahrenheit
+    max_temp: float | null   # Fahrenheit
+  climate: ENUM(Arid Tropical, Subtropical, Subtropical arid, Tropical, Tropical humid)
+  disease: array of ENUM(Crown rot, Downy mildiou, Erwinia, Fusarium, Gray mold, Phytophtora, Powdery, Pythium)
+  bugs: array of ENUM(Aphid, Mealy bug, Scale, Snail, Spider mite, Thrips, White fly)
+  soil:
+    soil_type: string | null
+    drainage_level: ENUM(fast, medium, well)
+    plant_specialty: ENUM(none, aroid, bromeliad, cactus, fern, orchid, palm, houseplant)
+    texture: ENUM(chunky, loose, airy, sandy, peat-based, bark, standard)
+    moisture_retention: ENUM(low, medium, high, standard)
+    organic_content: ENUM(rich)
+    special_notes: array of ENUM(mounted, bark, perlite, no_soil, organic)
+  care_level: ENUM(easy, medium, hard)
+
+desc_embeddings: array of float   # 1024 dims (voyage-4-lite)

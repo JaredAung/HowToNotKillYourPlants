@@ -1,0 +1,29 @@
+============================================================
+TWO-TOWER FIELD MAPPINGS
+User <-> Plant schema alignment for matching features
+============================================================
+
+User constraints.preferred_size  <->  Plant Info.size
+  Enum: small | medium | large
+
+User environment.light_level      <->  Plant Care.light_req.ideal_light.sunlight_bucket
+  (also consider tolerated_light.sunlight_bucket for match logic)
+  Enum: direct | bright_light | bright_indirect | indirect | diffused
+
+User environment.humidity_level  <->  Plant Care.humidity_req_bucket
+  Enum: low | medium | high
+
+User preferences.care_level      <->  Plant Care.care_level
+  Enum: easy | medium | hard
+
+User preferences.care_preferences.watering_freq  <->  Plant Care.water_req_bucket
+  Enum: low | medium | high
+
+User climate                     <->  Plant Care.climate
+  Enum: Arid Tropical | Subtropical | Subtropical arid | Tropical | Tropical humid
+
+User environment.temperature_pref (min_f, max_f)  <->  Plant Care.temp_req (min_temp, max_temp)
+  Overlap logic: plant range must intersect user range (Fahrenheit)
+
+User constraints.hard_no: frequent_watering  <->  Plant Care.water_req_bucket: high
+  Filter: exclude plants with water_req_bucket=high when user has frequent_watering in hard_no

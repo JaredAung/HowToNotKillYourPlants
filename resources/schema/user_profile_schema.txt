@@ -1,0 +1,55 @@
+ ============================================================
+USER PROFILE SCHEMA (data collected during onboarding)
+============================================================
+
+auth:
+  username: string
+
+profile:
+  name: string | null
+  avatar_url: string | null
+
+location:
+  city: string | null
+  state: string | null
+  postal_code: string | null
+  country: string | null   # default "US"
+
+climate: ENUM(Arid Tropical, Subtropical, Subtropical arid, Tropical, Tropical humid)
+
+environment:
+  light_level: ENUM(direct, bright_light, bright_indirect, indirect, diffused)
+  humidity_level: ENUM(low, medium, high)
+  temperature_pref:
+    min_f: float | null   # Fahrenheit
+    max_f: float | null   # Fahrenheit
+
+safety:
+  has_kids: boolean | null
+
+constraints:
+  preferred_size: ENUM(small, medium, large)   # maps to plant Info.size
+  hard_no: array of ENUM(frequent_watering)
+
+preferences:
+  care_level: ENUM(easy, medium, hard)   # aligned with plant care_level
+  care_preferences:
+    watering_freq: ENUM(low, medium, high)
+    care_freq: ENUM(low, medium, high)
+
+gamification: (defaults)
+  care_points: number
+  care_level: number
+  streak_days: number
+  multiplier: number
+  badges: array
+
+social: (defaults)
+  friends: array
+  neighborhood_id: string | null
+
+history: (defaults)
+  owned_plants_count: number
+  deaths_count: number
+  average_health_score: number
+  last_death_reason: string | null

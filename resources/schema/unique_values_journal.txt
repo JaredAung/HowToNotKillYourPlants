@@ -1,0 +1,244 @@
+============================================================
+CANONICAL VOCABULARY JOURNAL
+User (onboarding) + Plant (plant_profiles) - normalized for two-tower matching
+============================================================
+
+------------------------------------------------------------
+LIGHT (light_level / sunlight_bucket)
+User + Plant canonical (snake_case): direct | bright_light | bright_indirect | indirect | diffused
+--------------------------------------------------------
+  direct
+  bright_light
+  bright_indirect
+  indirect
+  diffused
+
+Source IDEALLIGHT raw → bucket mapping:
+  6 or more hours of direct sunlight per day. → direct
+  Bright light → bright_light
+  Prefers bright, indirect sunlight. → bright_indirect
+
+Source TOLERATEDLIGHT raw → bucket mapping:
+  Direct sunlight → direct
+  Diffused → diffused
+  / → null
+
+------------------------------------------------------------
+HUMIDITY (humidity_level / humidity_req_bucket)
+User + Plant canonical: low | medium | high
+--------------------------------------------------------
+  low
+  medium
+  high
+
+Source HUMIDITY raw → bucket: moderate/moderate-to-high → medium
+
+------------------------------------------------------------
+WATER (water_req_bucket / watering_freq)
+Plant + User canonical: low | medium | high
+--------------------------------------------------------
+  low
+  medium
+  high
+
+------------------------------------------------------------
+CARE_LEVEL (user + plant)
+Aligned for two-tower matching
+--------------------------------------------------------
+  easy
+  medium
+  hard
+
+------------------------------------------------------------
+CARE_FREQ / WATERING_FREQ (user)
+--------------------------------------------------------
+  low
+  medium
+  high
+
+------------------------------------------------------------
+CLIMATE
+User + Plant canonical (from source)
+--------------------------------------------------------
+  Arid Tropical
+  Subtropical
+  Subtropical arid
+  Tropical
+  Tropical humid
+
+------------------------------------------------------------
+SIZE (plant) / PREFERRED_SIZE (user)
+Explicit mapping: user constraints.preferred_size <-> plant Info.size
+Both canonical: small | medium | large
+--------------------------------------------------------
+  small
+  medium
+  large
+
+------------------------------------------------------------
+HARD_NO (user)
+--------------------------------------------------------
+  frequent_watering
+
+------------------------------------------------------------
+DRAINAGE_LEVEL (plant soil)
+Canonical: fast | medium | well
+--------------------------------------------------------
+  fast
+  medium
+  well
+
+------------------------------------------------------------
+MOISTURE_RETENTION (plant soil)
+Canonical: low | medium | high | standard
+--------------------------------------------------------
+  low
+  medium
+  high
+  standard
+
+------------------------------------------------------------
+PLANT_SPECIALTY (plant soil)
+--------------------------------------------------------
+  none
+  aroid
+  bromeliad
+  cactus
+  fern
+  orchid
+  palm
+  houseplant
+
+------------------------------------------------------------
+TEXTURE (plant soil)
+--------------------------------------------------------
+  chunky
+  loose
+  airy
+  sandy
+  peat-based
+  bark
+  standard
+
+------------------------------------------------------------
+CATEGORY (plant)
+--------------------------------------------------------
+  Aglaonema
+  Anthurium
+  Aralia
+  Bromeliad
+  Cactus And Succulent
+  Dieffenbachia
+  Dracaena
+  Fern
+  Ficus
+  Flower
+  Foliage plant
+  Grass
+  Hanging
+  Other
+  Palm
+  Philodendron
+  Sansevieria
+  Schefflera
+  Spathiphyllum
+
+------------------------------------------------------------
+ORIGIN (plant)
+--------------------------------------------------------
+  Africa
+  Asia
+  Australia
+  Australia & New Guinea
+  Brazil
+  Canaries
+  Central Africa
+  Central America
+  Central Mexico
+  China
+  Colombia
+  Costa rica
+  Cultivar
+  Dominica
+  Ecuador
+  Guinea
+  Guyana
+  Honduras
+  Hybrid
+  India
+  Indonisia
+  Japan
+  Java
+  Korea
+  Madagascar
+  Malaysia
+  Mediterranean
+  Mexico
+  New Calidonia
+  Ouest Africa
+  Philippines
+  Rodrigue Island
+  South Africa
+  South America
+  South Pacific
+  Taiwan
+  Venezuela
+  Vietnam
+  Zimbabwe
+
+------------------------------------------------------------
+INSECTS (plant bugs)
+--------------------------------------------------------
+  Aphid
+  Mealy bug
+  Scale
+  Snail
+  Spider mite
+  Thrips
+  White fly
+
+------------------------------------------------------------
+DISEASES (plant)
+--------------------------------------------------------
+  Crown rot
+  Downy mildiou
+  Erwinia
+  Fusarium
+  Gray mold
+  Phytophtora
+  Powdery
+  Pythium
+
+------------------------------------------------------------
+SOURCE RAW VALUES (house_plants_enriched_schema.json)
+For reference - these are normalized by plant_upload.py
+------------------------------------------------------------
+
+WATERING (12 unique raw)
+  Can be dry between watering. Water when soil is half dry.
+  Change water regularly in the vase. Water when soil is half dry.
+  Keep moist between watering. Can be a bit dry between watering
+  Keep moist between watering. Can dry between watering
+  Keep moist between watering. Must not be dry between watering
+  Keep moist between watering. Water when soil is half dry.
+  Must be dry between watering. Water only when dry.
+  Water only when dry or when soil is half dry.
+  Water only when dry. Must be dry between watering
+  Water only when the soil is dry. Must be dry between watering
+  Water when soil is half dry. Can be dry between watering.
+  Water when soil is half dry. Change water in the vase regularly.
+
+HUMIDITY (11 unique raw)
+  High humidity preferred.
+  High humidity required.
+  Moderate humidity (50–70%).
+  Moderate humidity preferred.
+  Moderate humidity required.
+  Moderate to high humidity preferred.
+  Moderate to high humidity required.
+  Prefers high humidity.
+  Prefers moderate humidity.
+  Requires high humidity (60%+).
+  Requires high humidity (60–70%).
+
+SOIL_TYPE (58 unique raw) - see house_plants_enriched_schema.json

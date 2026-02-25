@@ -1,0 +1,143 @@
+{
+  "$schema": "Plant Profile schema extracted from plant_profiles.json",
+  "description": "Schema for plant profile documents used in two-tower matching",
+  "type": "object",
+  "properties": {
+    "plant_id": { "type": "integer", "description": "Unique plant identifier" },
+    "img_url": { "type": ["string", "null"], "description": "Image URL" },
+    "Info": {
+      "type": "object",
+      "properties": {
+        "latin": { "type": ["string", "null"] },
+        "common_name": { "type": ["string", "null"] },
+        "category": {
+          "type": ["string", "null"],
+          "enum": ["Aglaonema", "Anthurium", "Aralia", "Bromeliad", "Cactus And Succulent", "Dieffenbachia", "Dracaena", "Fern", "Ficus", "Flower", "Foliage plant", "Grass", "Hanging", "Other", "Palm", "Philodendron", "Sansevieria", "Schefflera", "Spathiphyllum"]
+        },
+        "origin": { "type": ["string", "null"] },
+        "size": {
+          "type": ["string", "null"],
+          "enum": ["small", "medium", "large"],
+          "description": "Maps to user constraints.preferred_size for two-tower matching"
+        },
+        "desc": {
+          "type": "object",
+          "properties": {
+            "physical_desc": { "type": ["string", "null"] },
+            "symbolism": { "type": ["string", "null"] }
+          }
+        },
+        "growth_rate": {
+          "type": ["string", "null"],
+          "enum": ["moderate"]
+        }
+      }
+    },
+    "Care": {
+      "type": "object",
+      "properties": {
+        "water_req": { "type": ["string", "null"], "description": "Raw watering description" },
+        "water_req_bucket": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "light_req": {
+          "type": "object",
+          "properties": {
+            "ideal_light": {
+              "type": "object",
+              "properties": {
+                "sunlight_type": { "type": ["string", "null"] },
+                "sunlight_bucket": {
+                  "type": ["string", "null"],
+                  "enum": ["direct", "bright_light", "bright_indirect", "indirect", "diffused"]
+                },
+                "duration": { "type": ["string", "null"] }
+              }
+            },
+            "tolerated_light": {
+              "type": "object",
+              "properties": {
+                "sunlight_type": { "type": ["string", "null"] },
+                "sunlight_bucket": {
+                  "type": ["string", "null"],
+                  "enum": ["direct", "bright_light", "bright_indirect", "indirect", "diffused"]
+                },
+                "duration": { "type": ["string", "null"] }
+              }
+            }
+          }
+        },
+        "humidity_req": { "type": ["string", "null"], "description": "Raw humidity description" },
+        "humidity_req_bucket": {
+          "type": ["string", "null"],
+          "enum": ["low", "medium", "high"]
+        },
+        "temp_req": {
+          "type": "object",
+          "properties": {
+            "min_temp": { "type": ["number", "null"], "description": "Fahrenheit" },
+            "max_temp": { "type": ["number", "null"], "description": "Fahrenheit" }
+          }
+        },
+        "climate": {
+          "type": ["string", "null"],
+          "enum": ["Arid Tropical", "Subtropical", "Subtropical arid", "Tropical", "Tropical humid"]
+        },
+        "disease": {
+          "type": "array",
+          "items": {
+            "enum": ["Crown rot", "Downy mildiou", "Erwinia", "Fusarium", "Gray mold", "Phytophtora", "Powdery", "Pythium"]
+          }
+        },
+        "bugs": {
+          "type": "array",
+          "items": {
+            "enum": ["Aphid", "Mealy bug", "Scale", "Snail", "Spider mite", "Thrips", "White fly"]
+          }
+        },
+        "soil": {
+          "type": "object",
+          "properties": {
+            "soil_type": { "type": ["string", "null"] },
+            "drainage_level": {
+              "type": ["string", "null"],
+              "enum": ["fast", "medium", "well"]
+            },
+            "plant_specialty": {
+              "type": ["string", "null"],
+              "enum": ["none", "aroid", "bromeliad", "cactus", "fern", "orchid", "palm", "houseplant"]
+            },
+            "texture": {
+              "type": ["string", "null"],
+              "enum": ["chunky", "loose", "airy", "sandy", "peat-based", "bark", "standard"]
+            },
+            "moisture_retention": {
+              "type": ["string", "null"],
+              "enum": ["low", "medium", "high", "standard"]
+            },
+            "organic_content": {
+              "type": ["string", "null"],
+              "enum": ["rich"]
+            },
+            "special_notes": {
+              "type": "array",
+              "items": {
+                "enum": ["mounted", "bark", "perlite", "no_soil", "organic"]
+              }
+            }
+          }
+        },
+        "care_level": {
+          "type": ["string", "null"],
+          "enum": ["easy", "medium", "hard"]
+        }
+      }
+    },
+    "desc_embeddings": {
+      "type": "array",
+      "items": { "type": "number" },
+      "description": "Voyage embedding vector (1024 dims for voyage-4-lite)"
+    }
+  }
+}
