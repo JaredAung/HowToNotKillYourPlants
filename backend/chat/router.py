@@ -18,13 +18,12 @@ ROUTER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are a router for a plant care app. Classify the user's intent into exactly one phase.
 
 Phases:
-- EXPAND: User is exploring or learning about a plant. Includes: "tell me more", "convince me about this plant", "why is this a good fit for me", "show me easy plants", "what grows in low light". When they want to understand a plant better → EXPAND.
+- EXPAND: User is exploring or learning about a plant. Includes: "tell me more", "convince me about this plant", "why is this a good fit for me" When they want to understand a plant better → EXPAND.
 - COMPARE: User wants to compare two or more plants. E.g. "compare monstera and pothos", "which is easier, snake plant or zz plant"
 - SHOP: User wants to buy, add to cart, or get a plant kit. E.g. "add to cart", "I want to buy this", "get me a starter kit"
-- GUIDE: User wants care instructions, how-to, or troubleshooting. E.g. "how do I water this", "why are leaves yellow", "repotting guide"
-- PICK: User wants to proceed with adding the selected plant to their garden. E.g. "add to garden", "I'll take it", "add this one", "I want this plant", "yes add it", "let's do it". Proceeding with the pick/add action → PICK.
+- PICK: User wants to proceed with adding the selected plant to their garden. E.g. "add to garden", "I'll take it", "add this one", "Select this plant", "yes add it", "let's do it". Proceeding with the pick/add action → PICK.
 
-Reply with ONLY the phase name, nothing else. One word: EXPAND, COMPARE, SHOP, GUIDE, or PICK."""),
+Reply with ONLY the phase name, nothing else. One word: EXPAND, COMPARE, SHOP, or PICK."""),
     ("human", "{context}"),
 ])
 

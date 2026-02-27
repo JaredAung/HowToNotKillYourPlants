@@ -19,7 +19,7 @@ class State(TypedDict, total=False):
     ui_actions: list  # button clicks / confirmed actions
 
 
-from chat.nodes import expand_agent, _placeholder_agent
+from chat.nodes import compare_agent, expand_agent, _placeholder_agent
 from chat.router import route_to_phase
 
 
@@ -28,7 +28,7 @@ workflow = StateGraph(State)
 
 # Nodes
 workflow.add_node("expand", expand_agent)
-workflow.add_node("compare", _placeholder_agent("COMPARE"))
+workflow.add_node("compare", compare_agent)
 workflow.add_node("shop", _placeholder_agent("SHOP"))
 workflow.add_node("guide", _placeholder_agent("GUIDE"))
 workflow.add_node("pick", _placeholder_agent("PICK"))
