@@ -1,6 +1,6 @@
 """
 Call Ollama LLM for text generation and chat.
-Requires: pip install ollama
+Requires: pip install ollama, langchain-ollama
 Ensure Ollama is running: ollama serve
 """
 import os
@@ -8,6 +8,30 @@ import os
 DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120"))
+
+
+_ollama_llm = None
+
+
+def _get_ollama_llm():
+    """Create or return the LangChain ChatOllama instance (lazy-init)."""
+    global _ollama_llm
+    if _ollama_llm is None:
+        from langchain_ollama import ChatOllama
+        _ollama_llm = ChatOllama(
+            model=DEFAULT_MODEL,
+            base_url=OLLAMA_HOST,
+            temperature=0,
+        )
+    return _ollama_llm
+
+
+# LangChain ChatOllama instance. Import: from llm import ollama_llm
+# Lazy-initialized on first access via __getattr__.
+def __getattr__(name):
+    if name == "ollama_llm":
+        return _get_ollama_llm()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _client():

@@ -213,6 +213,40 @@ export async function getGarden() {
   return res.json();
 }
 
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export type InvokeChatOptions = {
+  messages: ChatMessage[];
+  selectedPlant?: Record<string, unknown>;
+  recommendedPlants?: Record<string, unknown>[];
+};
+
+export async function invokeChat(options: InvokeChatOptions) {
+  const token = getToken();
+  if (!token) throw new Error("Not logged in");
+  const res = await fetch(`${API_BASE}/chat/invoke`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      messages: options.messages,
+      selected_plant: options.selectedPlant,
+      recommended_plants: options.recommendedPlants,
+    }),
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      throw new Error("Session expired");
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || "Chat failed");
+  }
+  return res.json();
+}
+
 export async function updateProfile(data: Record<string, unknown>) {
   const token = getToken();
   if (!token) throw new Error("Not logged in");

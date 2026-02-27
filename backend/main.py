@@ -17,6 +17,7 @@ for _p in _env_paths:
         break
 
 from auth.auth import router as auth_router
+from chat.chat_router import router as chat_router
 from garden.garden import router as garden_router
 from plant.plant import router as plant_router
 from profile.profile import router as profile_router
@@ -32,6 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(chat_router)
 app.include_router(garden_router)
 app.include_router(plant_router)
 app.include_router(profile_router)

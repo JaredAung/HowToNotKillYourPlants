@@ -3,20 +3,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getExplanation, getRecommendations, getToken } from "@/lib/api";
+import { useRouter } from "next/navigation";
 import { PlantCard, type PlantRec } from "@/app/components/PlantCard";
 import { ExplanationDisplay } from "@/app/components/ExplanationDisplay";
-import { AddToGardenModal } from "@/app/components/AddToGardenModal";
+import { setChatContext } from "@/lib/chatContext";
 
 type RecResponse = { username?: string; plants?: PlantRec[]; message?: string; explanation?: string };
 
 export default function Home() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [recommendations, setRecommendations] = useState<RecResponse | null>(null);
   const [explanationOn, setExplanationOn] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [addToGardenPlant, setAddToGardenPlant] = useState<PlantRec | null>(null);
 
   useEffect(() => {
     const token = getToken();
@@ -113,7 +114,7 @@ export default function Home() {
                         p.rerank_score != null
                           ? Math.round(p.rerank_score * 100)
                           : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
-                      return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={() => setAddToGardenPlant(p)} />;
+                      return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={(plant) => { setChatContext(plant, plants.slice(0, 5)); router.push("/chat"); }} />;
                     })}
                   </div>
                 ) : (
@@ -135,12 +136,6 @@ export default function Home() {
           </div>
         )}
       </main>
-      {addToGardenPlant && (
-        <AddToGardenModal
-          plant={addToGardenPlant}
-          onClose={() => setAddToGardenPlant(null)}
-        />
-      )}
     </div>
   );
 }

@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getExplanation, getToken } from "@/lib/api";
+import { useRouter } from "next/navigation";
 import { ExplanationDisplay } from "@/app/components/ExplanationDisplay";
 import { PlantCard, type PlantRec } from "@/app/components/PlantCard";
-import { AddToGardenModal } from "@/app/components/AddToGardenModal";
+import { navigateToAddToGarden } from "@/lib/addToGarden";
 
 const SEARCH_RESULTS_KEY = "searchExtractedProfile";
 const SEARCH_PLANTS_KEY = "searchExtractedPlants";
@@ -37,12 +38,12 @@ function formatLabel(s: string): string {
 }
 
 export default function SearchResultsPage() {
+  const router = useRouter();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [plants, setPlants] = useState<PlantRec[]>([]);
   const [explanationOn, setExplanationOn] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
-  const [addToGardenPlant, setAddToGardenPlant] = useState<PlantRec | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -237,7 +238,7 @@ export default function SearchResultsPage() {
                   p.rerank_score != null
                     ? Math.round(p.rerank_score * 100)
                     : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
-                return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={() => setAddToGardenPlant(p)} />;
+                return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={(plant) => navigateToAddToGarden(plant, router)} />;
               })}
             </div>
           </div>
@@ -258,12 +259,6 @@ export default function SearchResultsPage() {
           </Link>
         </div>
       </div>
-      {addToGardenPlant && (
-        <AddToGardenModal
-          plant={addToGardenPlant}
-          onClose={() => setAddToGardenPlant(null)}
-        />
-      )}
     </div>
   );
 }

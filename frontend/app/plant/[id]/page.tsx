@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { getPlant } from "@/lib/api";
-import { AddToGardenModal } from "@/app/components/AddToGardenModal";
+import { navigateToAddToGarden } from "@/lib/addToGarden";
 import type { PlantRec } from "@/app/components/PlantCard";
 
 type PlantDetail = {
@@ -41,12 +42,12 @@ function formatLabel(s: string): string {
 
 export default function PlantDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id as string | undefined;
   const plantId = id ? parseInt(id, 10) : NaN;
   const [plant, setPlant] = useState<PlantDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAddToGarden, setShowAddToGarden] = useState(false);
 
   useEffect(() => {
     if (!id || isNaN(plantId)) {
@@ -159,12 +160,12 @@ export default function PlantDetailPage() {
                   <p className="text-forest-600 text-base italic">{plant.latin}</p>
                 )}
                 <button
-                  type="button"
-                  onClick={() => setShowAddToGarden(true)}
-                  className="mt-3 px-4 py-2 rounded-lg bg-forest-600 text-white text-sm font-medium hover:bg-forest-700 flex items-center gap-2"
-                >
-                  <span>+</span> Add to garden
-                </button>
+                    type="button"
+                    onClick={() => navigateToAddToGarden({ plant_id: plant.plant_id, score: 0, latin: plant.latin, common_name: plant.common_name, img_url: plant.img_url } as PlantRec, router)}
+                    className="mt-3 px-4 py-2 rounded-lg bg-forest-600 text-white text-sm font-medium hover:bg-forest-700 flex items-center gap-2"
+                  >
+                    <span>+</span> Add to garden
+                  </button>
               </div>
             </div>
 
@@ -190,20 +191,6 @@ export default function PlantDetailPage() {
           </div>
         </div>
       </div>
-      {showAddToGarden && (
-        <AddToGardenModal
-          plant={
-            {
-              plant_id: plant.plant_id,
-              score: 0,
-              latin: plant.latin,
-              common_name: plant.common_name,
-              img_url: plant.img_url,
-            } as PlantRec
-          }
-          onClose={() => setShowAddToGarden(false)}
-        />
-      )}
     </div>
   );
 }
