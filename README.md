@@ -5,6 +5,7 @@
 Unlike traditional plant apps that recommend plants using static filters or popularity, this system uses **machine learning, semantic reranking, and failure-aware learning** to continuously improve plant recommendations.
 
 This project is the V2 of the project developed for **SFHacks 2026** 
+
 V1 : [HowToNotKillYourIndoorPlants](https://github.com/JaredAung/HowToNotKillYourIndoorPlants).
 
 ---
