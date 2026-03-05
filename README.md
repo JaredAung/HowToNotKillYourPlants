@@ -199,25 +199,6 @@ The assistant routes user intents to specialized actions.
 
 ---
 
-## Chat Agent Architecture
-
-```mermaid
-flowchart TD
-    User[User Message] --> Router[LLM Router]
-    Router -->|EXPAND| Expand[Expand Agent]
-    Router -->|COMPARE| Compare[Compare Agent]
-    Router -->|PICK| Pick[Pick Agent]
-    Router -->|SHOP| Shop[Shop Agent]
-    Router -->|GUIDE| Guide[Guide Agent]
-
-    PlantDB[(Plant DB)] --> Expand
-    PlantDB --> Compare
-    Tavily[Tavily Search] --> Compare
-    GardenDB[(Garden DB)] --> Pick
-    PlantDB --> Pick
-```
-
----
 
 # 🌿 Application Features
 
