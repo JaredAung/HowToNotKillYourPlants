@@ -403,6 +403,3 @@ Frontend runs at: **http://localhost:3000**
 
 ---
 
-# 📜 License
-
-Developed for **SFHacks 2026**.
