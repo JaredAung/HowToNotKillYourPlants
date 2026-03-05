@@ -19,16 +19,22 @@ export default function Home() {
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchRecs = (forceRefresh = false) => {
     const token = getToken();
     if (!token) {
       setLoading(false);
       return;
     }
-    getRecommendations()
+    setLoading(true);
+    setError(null);
+    getRecommendations({ use_rerank: false, forceRefresh })
       .then((data) => setRecommendations(data as RecResponse))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchRecs();
   }, []);
 
   useEffect(() => {
@@ -75,7 +81,18 @@ export default function Home() {
                   <h2 className="text-lg font-semibold text-forest-800">
                     For you, {recommendations.username ?? "you"}
                   </h2>
-                  {plants.length > 0 && (
+                  <div className="flex items-center gap-3">
+                    {plants.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => fetchRecs(true)}
+                      disabled={loading}
+                      className="text-sm text-forest-600 hover:text-forest-800 underline disabled:opacity-50"
+                    >
+                      Refresh
+                    </button>
+                    )}
+                    {plants.length > 0 && (
                     <label className="flex items-center gap-2 cursor-pointer">
                       <span className="text-sm text-forest-600">Explanation</span>
                       <button
@@ -94,7 +111,8 @@ export default function Home() {
                         />
                       </button>
                     </label>
-                  )}
+                    )}
+                  </div>
                 </div>
                 {plants.length > 0 && explanationOn && (
                   <div className="w-full max-w-2xl mx-auto rounded-xl border border-sage-200 bg-white shadow-leaf p-5">

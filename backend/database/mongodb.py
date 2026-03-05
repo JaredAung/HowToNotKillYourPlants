@@ -13,6 +13,7 @@ MONGO_DATABASE = os.getenv("MONGO_DATABASE", "HowNotToKillYourPlants")
 USER_COLLECTION = os.getenv("MONGO_USER_PROFILES_COLLECTION", "UserCollection")
 PLANT_COLLECTION = os.getenv("PLANT_MONGO_COLLECTION", "PlantCollection")
 GARDEN_COLLECTION = os.getenv("MONGO_USER_GARDEN_COLLECTION", "User_Garden_Collection")
+DEATH_COLLECTION = os.getenv("PLANT_DEATH_COLLECTION", "PlantDeathCollection")
 TOKEN_BLACKLIST_COLLECTION = os.getenv("MONGO_TOKEN_BLACKLIST_COLLECTION", "TokenBlacklist")
 
 
@@ -39,6 +40,13 @@ def get_plant_collection() -> Collection:
 def get_garden_collection() -> Collection:
     """Get User_Garden_Collection (user's planted plants)."""
     return get_db()[GARDEN_COLLECTION]
+
+
+def get_death_collection() -> Collection:
+    """Get PlantDeathCollection (records of plants that died). TTL 30 days on expires_at."""
+    coll = get_db()[DEATH_COLLECTION]
+    coll.create_index("expires_at", expireAfterSeconds=0)
+    return coll
 
 
 def get_token_blacklist_collection() -> Collection:

@@ -76,11 +76,56 @@ export async function getMe() {
   return res.json();
 }
 
-export async function getRecommendations(options?: { k?: number }) {
+const HOME_REC_CACHE_KEY = "homeRecommendationsCache";
+
+function getCachedRecommendations(): Record<string, unknown> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = sessionStorage.getItem(HOME_REC_CACHE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    const plants = parsed?.plants as unknown[] | undefined;
+    if (!plants || plants.length === 0) return null;
+    return parsed;
+  } catch {
+    sessionStorage.removeItem(HOME_REC_CACHE_KEY);
+    return null;
+  }
+}
+
+function setCachedRecommendations(data: Record<string, unknown>) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(HOME_REC_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    sessionStorage.removeItem(HOME_REC_CACHE_KEY);
+  }
+}
+
+export function clearRecommendationsCache() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(HOME_REC_CACHE_KEY);
+}
+
+export async function getRecommendations(options?: {
+  k?: number;
+  use_rerank?: boolean;
+  forceRefresh?: boolean;
+}) {
   const token = getToken();
   if (!token) throw new Error("Not logged in");
+
+  // Use cached recs when available; only call API when cache is empty or forceRefresh
+  if (!options?.forceRefresh) {
+    const cached = getCachedRecommendations();
+    if (cached) return cached;
+  } else {
+    clearRecommendationsCache();
+  }
+
   const params = new URLSearchParams();
   if (options?.k !== undefined) params.set("k", String(options.k));
+  if (options?.use_rerank === false) params.set("use_rerank", "false");
   const qs = params.toString();
   const url = `${API_BASE}/recommend/${qs ? `?${qs}` : ""}`;
   const res = await fetch(url, {
@@ -95,7 +140,9 @@ export async function getRecommendations(options?: { k?: number }) {
     const msg = Array.isArray(err.detail) ? err.detail : err.detail;
     throw new Error(typeof msg === "string" ? msg : "Failed to load recommendations");
   }
-  return res.json();
+  const data = (await res.json()) as Record<string, unknown>;
+  setCachedRecommendations(data);
+  return data;
 }
 
 export async function getExplanation(plantIds: number[]) {
@@ -209,6 +256,51 @@ export async function getGarden() {
       throw new Error("Session expired");
     }
     throw new Error("Failed to load garden");
+  }
+  return res.json();
+}
+
+export type DeathReportPayload = {
+  plant_id: number;
+  what_happened: string[];
+  watering_frequency?: string;
+  plant_location?: string;
+  humidity_level?: string;
+  room_temperature?: string;
+  death_reason?: string;
+  plant_profile?: Record<string, unknown>;
+  user_profile?: Record<string, unknown>;
+};
+
+export async function markPlantDead(payload: DeathReportPayload) {
+  const token = getToken();
+  if (!token) throw new Error("Not logged in");
+  const res = await fetch(`${API_BASE}/garden/death`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      plant_id: payload.plant_id,
+      what_happened: payload.what_happened,
+      watering_frequency: payload.watering_frequency ?? null,
+      plant_location: payload.plant_location ?? null,
+      humidity_level: payload.humidity_level ?? null,
+      room_temperature: payload.room_temperature ?? null,
+      death_reason: payload.death_reason ?? null,
+      plant_profile: payload.plant_profile ?? null,
+      user_profile: payload.user_profile ?? null,
+    }),
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      throw new Error("Session expired");
+    }
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.detail;
+    throw new Error(typeof msg === "string" ? msg : "Failed to mark plant as dead");
   }
   return res.json();
 }

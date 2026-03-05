@@ -3,18 +3,16 @@ Garden API. Add plants to user's garden and list them.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
 
 from auth.jwt import get_current_username
 from database import get_garden_collection, get_plant_collection
+from schemas import AddToGardenRequest
+
+from garden.death import router as death_router
 
 router = APIRouter(prefix="/garden", tags=["garden"])
-
-
-class AddToGardenRequest(BaseModel):
-    plant_id: int
-    custom_name: str | None = None
+router.include_router(death_router)
 
 
 @router.post("/add")
@@ -76,6 +74,7 @@ def get_my_garden(username: str = Depends(get_current_username)):
             "plant_id": item["plant_id"],
             "custom_name": item.get("custom_name", info.get("latin") or f"Plant #{item['plant_id']}"),
             "added_at": item.get("added_at"),
+            "match_percentage": item.get("match_percentage"),
             "img_url": p.get("img_url"),
             "latin": info.get("latin"),
             "common_name": info.get("common_name"),
