@@ -10,20 +10,6 @@ V1 : [HowToNotKillYourIndoorPlants](https://github.com/JaredAung/HowToNotKillYou
 
 ---
 
-# 🌿 Project TODO (for AI / development)
-
-- [ ] **README:** demo video link, example recommendation output
-- [ ] **Evaluation:** Precision@K, MAP, Coverage, Diversity; comparison table; % improvement vs baseline
-- [ ] **Dashboard:** Streamlit — model metrics, system metrics, dataset stats, coverage, diversity
-- [ ] **Architecture doc:** pipeline diagram (User Input → Feature Encoding → Vector Retrieval → Two-Tower → Reranker → LLM Explanation → Final Rec)
-- [ ] **Dataset doc:** plant count, features, example record; user interactions (garden, deaths, search)
-- [ ] **Death learning:** explain positives (garden adds), negatives (deaths), retrain usage
-- [ ] **Demo video:** 2–3 min — preferences, results, LLM explanation, dashboard
-- [ ] **GitHub:** architecture diagram, metrics table, dashboard screenshots, demo video
-- [ ] **Future:** online learning, sequential history, cold-start, RL, disease detection
-
----
-
 # 🚀 Key Innovations
 
 ### 🧠 ML Recommendation Engine
