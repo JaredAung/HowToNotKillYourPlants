@@ -10,6 +10,20 @@ V1 : [HowToNotKillYourIndoorPlants](https://github.com/JaredAung/HowToNotKillYou
 
 ---
 
+# 🌿 Project TODO (for AI / development)
+
+- [ ] **README:** demo video link, example recommendation output
+- [ ] **Evaluation:** Precision@K, MAP, Coverage, Diversity; comparison table; % improvement vs baseline
+- [ ] **Dashboard:** Streamlit — model metrics, system metrics, dataset stats, coverage, diversity
+- [ ] **Architecture doc:** pipeline diagram (User Input → Feature Encoding → Vector Retrieval → Two-Tower → Reranker → LLM Explanation → Final Rec)
+- [ ] **Dataset doc:** plant count, features, example record; user interactions (garden, deaths, search)
+- [ ] **Death learning:** explain positives (garden adds), negatives (deaths), retrain usage
+- [ ] **Demo video:** 2–3 min — preferences, results, LLM explanation, dashboard
+- [ ] **GitHub:** architecture diagram, metrics table, dashboard screenshots, demo video
+- [ ] **Future:** online learning, sequential history, cold-start, RL, disease detection
+
+---
+
 # 🚀 Key Innovations
 
 ### 🧠 ML Recommendation Engine
@@ -184,6 +198,40 @@ final_score = base_score − λ × similarity_to_dead_plants
 This prevents recommending plants that **historically failed for the user**.
 
 ---
+
+# 📊 Evaluation Metrics
+
+**Current metrics:**
+
+- [ ] Recall@K
+- [ ] NDCG@K
+- [ ] Hit Rate
+- [ ] Latency (mean, p95)
+
+**Add additional metrics:**
+
+- [ ] Precision@K
+- [ ] MAP (Mean Average Precision)
+- [ ] Coverage
+- [ ] Diversity
+
+**Comparison table:**
+
+| Model             | Recall@5 | Recall@10 | Recall@20 | NDCG@5 | NDCG@10 | NDCG@20 | Hit@5 | Hit@10 | Hit@20 | Latency (mean) | Latency (p95) |
+| ----------------- | -------- | --------- | --------- | ------ | ------- | ------- | ----- | ------ | ------ | -------------- | ------------- |
+| Semantic Baseline | 0.019    | 0.060     | 0.140     | 0.162  | 0.175   | 0.192   | 0.29  | 0.48   | 0.74   | 135 ms         | 197 ms        |
+| Rec Pipeline      | 0.292    | 0.504     | 0.785     | 0.642  | 0.693   | 0.751   | 0.90  | 0.97   | 1.00   | 3000 ms        | 4060 ms      |
+
+**% improvement vs baseline (Rec Pipeline):**
+
+| Metric     | @5    | @10   | @20   |
+| ---------- | ----- | ----- | ----- |
+| Recall     | +1413% | +738% | +461% |
+| NDCG       | +296% | +296% | +291% |
+| Hit Rate   | +211% | +100% | +35%  |
+
+---
+
 
 # 🤖 LLM Chat Assistant
 
