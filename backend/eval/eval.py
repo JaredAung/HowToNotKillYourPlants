@@ -1,11 +1,11 @@
 """
-Eval script: baseline (cosine similarity on profile_embedding) vs rec pipeline (extract + two-tower + rerank).
+Eval script: baseline (cosine similarity on profile_embedding) vs rec pipeline (two-tower + rerank).
 
 Ground truth: Oracle-based via compute_oracle_score (light, water, humidity, temp, size).
 Positives: score >= 0.75; negatives: score < 0.3 or hard-filtered.
 
 Baseline: Cosine similarity between user profile_embedding and plant profile_embedding -> rank.
-Rec pipeline: Extract profile from query (LLM) -> merge with user -> recommend_for_profile.
+Rec pipeline: Structured profile -> two-tower vector search -> Cohere rerank -> death penalty.
 
 Metrics: Recall@K, NDCG@K, Hit Rate@K (K=5, 10, 20).
 Latency: Mean and p95 for both pipelines.
@@ -30,10 +30,8 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 # Backend imports (after path setup)
-from llm import chat_simple
 from recommend.feature_loader import normalize_profile
 from recommend.recommend import recommend_for_profile
-from search.search import EXTRACT_SCHEMA, _merge_profile, _parse_extracted
 
 # Paths
 USERS_PATH = ROOT / "resources" / "synthetic_users.json"
@@ -53,7 +51,7 @@ VOYAGE_EMBED_MODEL = "voyage-4-lite"
 
 
 def _syn_user_to_existing(syn_user: dict) -> dict:
-    """Convert synthetic user to format expected by _merge_profile."""
+    """Convert synthetic user to structured profile for recommend_for_profile."""
     return {
         "username": f"eval_user_{syn_user['user_id']}",
         "environment": syn_user.get("environment", {}),
@@ -61,50 +59,6 @@ def _syn_user_to_existing(syn_user: dict) -> dict:
         "constraints": syn_user.get("constraints", {}),
         "climate": syn_user.get("climate"),
     }
-
-
-def _query_from_user(syn_user: dict) -> str:
-    """Generate a query from synthetic user profile (for eval)."""
-    env = syn_user.get("environment", {}) or {}
-    pref = syn_user.get("preferences", {}) or {}
-    care_pref = pref.get("care_preferences", {}) or {}
-    constraints = syn_user.get("constraints", {}) or {}
-    parts = []
-    if env.get("light_level"):
-        parts.append(f"I have {env['light_level'].replace('_', ' ')} light")
-    if env.get("humidity_level"):
-        parts.append(f"{env['humidity_level']} humidity")
-    if constraints.get("preferred_size"):
-        parts.append(f"I want a {constraints['preferred_size']} plant")
-    if pref.get("care_level"):
-        parts.append(f"prefer {pref['care_level']} care")
-    if care_pref.get("watering_freq"):
-        parts.append(f"{care_pref['watering_freq']} watering")
-    return ". ".join(parts) if parts else "I want an easy low-light plant"
-
-
-def extract_profile_from_query(query: str, existing: dict) -> dict:
-    """Extract profile from query using LLM, merge with existing. No auth."""
-    system = (
-        "You extract plant preferences from user descriptions. "
-        "The text may describe: (1) environment/care needs (light, humidity, etc.), "
-        "or (2) what kind of plant they want - physical appearance and symbolism. "
-        "Extract both structured fields and free-text physical_desc/symbolism when present. "
-        "Infer only what is clearly stated or strongly implied. "
-        + EXTRACT_SCHEMA
-    )
-    user_msg = (
-        f"User's current profile (for context): {json.dumps(existing, default=str)}\n\n"
-        f"User's new text:\n{query}\n\n"
-        "Extract any plant preference fields from the new text. Return JSON."
-    )
-    try:
-        out = chat_simple(user_message=user_msg, system=system)
-        extracted = _parse_extracted(out or "")
-    except Exception:
-        extracted = {}
-    merged = _merge_profile(existing, extracted)
-    return normalize_profile(merged)
 
 
 # --- Oracle (same logic as two_tower_training) ---
@@ -318,7 +272,6 @@ def run_eval(
 
     for syn_user in users:
         existing = _syn_user_to_existing(syn_user)
-        query = _query_from_user(syn_user)
         username = existing["username"]
 
         # Ground truth: oracle positives
@@ -344,11 +297,11 @@ def run_eval(
             baseline_ndcgs[k].append(ndcg_at_k(relevant, baseline_pred, k))
             baseline_hits[k].append(hit_rate_at_k(relevant, baseline_pred, k))
 
-        # Rec pipeline (extract + recommend)
+        # Rec pipeline (structured profile, no LLM extraction)
         if use_mongo:
             t0 = time.perf_counter()
-            merged = extract_profile_from_query(query, existing)
-            pred = rec_pipeline_rank(merged, username, k=max(EVAL_KS), use_rerank=use_rerank)
+            profile = normalize_profile(existing)
+            pred = rec_pipeline_rank(profile, username, k=max(EVAL_KS), use_rerank=use_rerank)
             rec_latencies.append((time.perf_counter() - t0) * 1000)
 
             for k in EVAL_KS:
