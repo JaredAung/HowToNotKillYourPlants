@@ -1,17 +1,16 @@
 """
-Eval script: compare baseline (Voyage embed + dot product) vs rec pipeline (extract + two-tower + rerank).
+Eval script: baseline (cosine similarity on profile_embedding) vs rec pipeline (extract + two-tower + rerank).
 
 Ground truth: Oracle-based via compute_oracle_score (light, water, humidity, temp, size).
 Positives: score >= 0.75; negatives: score < 0.3 or hard-filtered.
 
-Baseline: Voyage embed user query -> dot product with plant desc_embeddings -> rank.
+Baseline: Cosine similarity between user profile_embedding and plant profile_embedding -> rank.
 Rec pipeline: Extract profile from query (LLM) -> merge with user -> recommend_for_profile.
 
 Metrics: Recall@K, NDCG@K, Hit Rate@K (K=5, 10, 20).
 Latency: Mean and p95 for both pipelines.
 
-Run from project root: python -m backend.scratch.scratch
-Or: cd backend && python scratch/scratch.py
+Run from project root: python -m backend.eval.eval
 """
 from __future__ import annotations
 
@@ -235,15 +234,27 @@ def dot_product(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def baseline_rank(query: str, plants: list[dict], k: int = 20) -> list[int]:
-    """Baseline: Voyage embed query -> dot product with desc_embeddings -> rank."""
-    q_emb = voyage_embed_query(query)
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors."""
+    dp = dot_product(a, b)
+    na = math.sqrt(dot_product(a, a))
+    nb = math.sqrt(dot_product(b, b))
+    if na <= 0 or nb <= 0:
+        return 0.0
+    return dp / (na * nb)
+
+
+def baseline_rank(user: dict, plants: list[dict], k: int = 20) -> list[int]:
+    """Baseline: cosine similarity between user profile_embedding and plant profile_embedding -> rank."""
+    user_emb = user.get("profile_embedding") or []
+    if not user_emb:
+        return []
     scored = []
     for p in plants:
-        emb = p.get("desc_embeddings") or []
-        if not emb:
+        plant_emb = p.get("profile_embedding") or []
+        if not plant_emb:
             continue
-        score = dot_product(q_emb, emb)
+        score = cosine_similarity(user_emb, plant_emb)
         scored.append((p["plant_id"], score))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [pid for pid, _ in scored[:k]]
@@ -323,9 +334,9 @@ def run_eval(
         if not relevant:
             continue  # skip users with no positives
 
-        # Baseline
+        # Baseline: cosine similarity between user profile_embedding and plant profile_embedding
         t0 = time.perf_counter()
-        baseline_pred = baseline_rank(query, plants, k=max(EVAL_KS))
+        baseline_pred = baseline_rank(syn_user, plants, k=max(EVAL_KS))
         baseline_latencies.append((time.perf_counter() - t0) * 1000)
 
         for k in EVAL_KS:
@@ -394,12 +405,18 @@ def main():
 
     print("Loading plants...")
     plants = load_plants_from_json()
-    plants_with_emb = [p for p in plants if p.get("desc_embeddings")]
-    print(f"  {len(plants)} plants, {len(plants_with_emb)} with desc_embeddings")
+    plants_with_emb = [p for p in plants if p.get("profile_embedding")]
+    print(f"  {len(plants)} plants, {len(plants_with_emb)} with profile_embedding")
 
     if not plants_with_emb:
-        print("ERROR: No plants with desc_embeddings. Run plant_data_clean.py first.")
+        print("ERROR: No plants with profile_embedding. Run: python -m backend.eval.plant_embed")
         sys.exit(1)
+
+    users_with_emb = [u for u in users if u.get("profile_embedding")]
+    if not users_with_emb:
+        print("ERROR: No users with profile_embedding. Run: python -m backend.eval.embed")
+        sys.exit(1)
+    users = users_with_emb
 
     use_mongo = load_plants_from_mongo() is not None
     if not use_mongo:

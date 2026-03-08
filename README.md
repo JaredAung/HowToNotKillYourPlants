@@ -217,18 +217,18 @@ This prevents recommending plants that **historically failed for the user**.
 
 **Comparison table:**
 
-| Model             | Recall@5 | Recall@10 | Recall@20 | NDCG@5 | NDCG@10 | NDCG@20 | Hit@5 | Hit@10 | Hit@20 | Latency (mean) | Latency (p95) |
-| ----------------- | -------- | --------- | --------- | ------ | ------- | ------- | ----- | ------ | ------ | -------------- | ------------- |
-| Semantic Baseline | 0.019    | 0.060     | 0.140     | 0.162  | 0.175   | 0.192   | 0.29  | 0.48   | 0.74   | 135 ms         | 197 ms        |
-| Rec Pipeline      | 0.292    | 0.504     | 0.785     | 0.642  | 0.693   | 0.751   | 0.90  | 0.97   | 1.00   | 3000 ms        | 4060 ms      |
+| Model                    | Recall@5 | Recall@10 | Recall@20 | NDCG@5 | NDCG@10 | NDCG@20 | Hit@5 | Hit@10 | Hit@20 | Latency (mean) | Latency (p95) |
+| ------------------------ | -------- | --------- | --------- | ------ | ------- | ------- | ----- | ------ | ------ | -------------- | ------------- |
+| Profile Embedding Baseline | 0.2200   | 0.2978    | 0.3835    | 0.4881 | 0.4706  | 0.4395  | 0.68  | 0.71   | 0.74   | 11 ms          | 12 ms         |
+| Rec Pipeline             | 0.292    | 0.504     | 0.785     | 0.642  | 0.693   | 0.751   | 0.90  | 0.97   | 1.00   | 3000 ms        | 4060 ms       |
 
-**% improvement vs baseline (Rec Pipeline):**
+**% improvement vs baseline (Rec Pipeline vs Profile Embedding Baseline):**
 
-| Metric     | @5    | @10   | @20   |
-| ---------- | ----- | ----- | ----- |
-| Recall     | +1413% | +738% | +461% |
-| NDCG       | +296% | +296% | +291% |
-| Hit Rate   | +211% | +100% | +35%  |
+| Metric     | @5   | @10  | @20   |
+| ---------- | ---- | ---- | ----- |
+| Recall     | +33% | +69% | +105% |
+| NDCG       | +32% | +47% | +71%  |
+| Hit Rate   | +33% | +37% | +35%  |
 
 ---
 
