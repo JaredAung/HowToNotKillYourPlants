@@ -27,3 +27,10 @@ frontend/out/
 # OS
 .DS_Store
 Thumbs.db
+
+# DVC (model weights tracked by DVC, not Git)
+resources/two_tower_training/output/two_tower.pt
+
+# DVC
+.dvc/cache
+.dvc/tmp

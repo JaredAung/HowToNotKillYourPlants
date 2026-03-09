@@ -1,0 +1,5 @@
+outs:
+- md5: d80c1bb10bcce2338340317904dddf92
+  size: 566291
+  hash: md5
+  path: two_tower.pt
