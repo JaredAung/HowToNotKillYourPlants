@@ -38,6 +38,14 @@ Recommendations are based on **real user conditions**, including:
 * Watering habits
 * Care difficulty tolerance
 
+### 🔄 Continuous Retraining
+
+The model can be **retrained on real user data** — garden plants, deaths, and synthetic interactions. Real interactions are weighted higher. Run `python -m backend.recommend.retrain.retrain_two_tower` to retrain from production data.
+
+### 📦 DVC Model Versioning
+
+Model weights are versioned with **DVC** and stored in Google Drive. Track model updates, pull on fresh clones with `dvc pull`, and push new versions after retraining with `--dvc-add`.
+
 ---
 
 # 🏗 System Architecture
@@ -298,6 +306,7 @@ Death reports expire after **30 days using MongoDB TTL indexes**.
 | **LLM Framework**   | LangChain + LangGraph             |
 | **LLM Runtime**     | Ollama                            |
 | **External Search** | Tavily                            |
+| **Model Versioning**| DVC (Google Drive)                |
 
 ---
 
@@ -394,14 +403,81 @@ pip install -r requirements.txt
 
 ## Train the Model
 
+**Initial training** (synthetic data only):
+
 ```bash
 python resources/two_tower_training/two_tower_training.py
+```
+
+**Retrain** (synthetic + real garden/death data from MongoDB, recommended):
+
+```bash
+python -m backend.recommend.retrain.retrain_two_tower
 ```
 
 Outputs:
 
 * `two_tower.pt`
-* `plant_embeddings.json`
+* `plant_embeddings.json` (regenerated from model)
+
+### Model versioning with DVC
+
+Model weights (`two_tower.pt`) and metrics (`retrain_metrics.txt`) are tracked with [DVC](https://dvc.org/) and stored in [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH). `plant_embeddings.json` is regenerated from the model.
+
+**Setup** (one-time):
+
+```bash
+pip install "dvc[gdrive]"
+# Remote is preconfigured in .dvc/config
+```
+
+**Google Drive OAuth** (required — default DVC app is blocked by Google):
+
+1. Create a [Google Cloud project](https://console.cloud.google.com/apis) and enable **Google Drive API**
+2. Configure **OAuth consent screen** → add yourself as a **Test user** at [Auth audience](https://console.cloud.google.com/apis/credentials/consent)
+3. Create **OAuth client ID** → Application type: **Desktop app**
+4. Add redirect URI `http://localhost:8080/` in Credentials → your OAuth client → Authorized redirect URIs
+5. Configure DVC:
+   ```bash
+   dvc remote modify storage gdrive_client_id 'YOUR_CLIENT_ID'
+   dvc remote modify storage gdrive_client_secret 'YOUR_CLIENT_SECRET'
+   ```
+   Use `--local` to keep credentials out of the repo.
+
+**After retraining** (to version the new model):
+
+```bash
+python -m backend.recommend.retrain.retrain_two_tower --dvc-add
+git add resources/two_tower_training/output/*.dvc
+git commit -m "Update model"
+dvc push
+```
+
+**Pull model** (e.g. on a fresh clone):
+
+```bash
+dvc pull
+```
+
+**File locations:**
+
+| What | Path |
+|------|------|
+| Model | `resources/two_tower_training/output/two_tower.pt` |
+| Metrics | `resources/two_tower_training/output/retrain_metrics.txt` |
+| Baseline vs rec | `resources/two_tower_training/output/baselineVs.txt` |
+| DVC pointers | `*.dvc` in `resources/two_tower_training/output/` |
+| Plant embeddings | `resources/two_tower_training/output/plant_embeddings.json` |
+| Drive folder | [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH) |
+
+**Prefect flow** (optional scheduling):
+
+```bash
+pip install prefect
+python -m backend.recommend.retrain.prefect_flow
+python -m backend.recommend.retrain.prefect_flow --dvc-push   # retrain + push to Drive
+python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip baseline vs rec eval
+```
 
 ---
 

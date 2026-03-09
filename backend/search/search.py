@@ -15,7 +15,10 @@ from llm import chat_simple
 from recommend.feature_loader import normalize_profile
 from recommend.recommend import recommend_for_profile
 
+from search.semantic_search import router as semantic_router
+
 router = APIRouter(prefix="/search", tags=["search"])
+router.include_router(semantic_router)
 
 EXTRACT_SCHEMA = """
 Return a JSON object with ONLY the fields you can infer from the user's text.

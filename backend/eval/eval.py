@@ -10,7 +10,9 @@ Rec pipeline: Structured profile -> two-tower vector search -> Cohere rerank -> 
 Metrics: Recall@K, NDCG@K, Hit Rate@K (K=5, 10, 20).
 Latency: Mean and p95 for both pipelines.
 
-Run from project root: python -m backend.eval.eval
+Run from project root:
+  python -m backend.eval.eval
+  python -m backend.eval.eval --output resources/two_tower_training/output/baselineVs.txt
 """
 from __future__ import annotations
 
@@ -214,9 +216,13 @@ def baseline_rank(user: dict, plants: list[dict], k: int = 20) -> list[int]:
     return [pid for pid, _ in scored[:k]]
 
 
-def rec_pipeline_rank(profile: dict, username: str, k: int = 20, use_rerank: bool = True) -> list[int]:
-    """Rec pipeline: recommend_for_profile -> plant_ids in order."""
-    out = recommend_for_profile(profile, username, k=k, use_rerank=use_rerank)
+def rec_pipeline_rank(
+    profile: dict, username: str, k: int = 20, use_rerank: bool = True, use_death_penalty: bool = False
+) -> list[int]:
+    """Rec pipeline: recommend_for_profile -> plant_ids in order. Eval uses use_death_penalty=False."""
+    out = recommend_for_profile(
+        profile, username, k=k, use_rerank=use_rerank, use_death_penalty=use_death_penalty
+    )
     return [p["plant_id"] for p in out.get("plants", [])]
 
 
@@ -350,7 +356,42 @@ def run_eval(
     return results
 
 
+def _format_results_txt(results: dict) -> str:
+    """Format eval results as human-readable text for baselineVs.txt."""
+    lines = [
+        "baseline vs rec_pipeline",
+        "",
+        "config",
+        f"  n_users={results.get('n_users', 0)}",
+        f"  n_plants={results.get('n_plants', 0)}",
+        "",
+        "baseline",
+    ]
+    bl = results.get("baseline", {})
+    for k in EVAL_KS:
+        lines.append(f"  Recall@{k}={bl.get('recall', {}).get(k, 0):.4f}  NDCG@{k}={bl.get('ndcg', {}).get(k, 0):.4f}  Hit@{k}={bl.get('hit_rate', {}).get(k, 0):.4f}")
+    lines.append(f"  latency_ms_mean={bl.get('latency_ms_mean', 0):.0f}  latency_ms_p95={bl.get('latency_ms_p95', 0):.0f}")
+    lines.append("")
+
+    rp = results.get("rec_pipeline")
+    if rp:
+        lines.append("rec_pipeline")
+        for k in EVAL_KS:
+            lines.append(f"  Recall@{k}={rp.get('recall', {}).get(k, 0):.4f}  NDCG@{k}={rp.get('ndcg', {}).get(k, 0):.4f}  Hit@{k}={rp.get('hit_rate', {}).get(k, 0):.4f}")
+        lines.append(f"  latency_ms_mean={rp.get('latency_ms_mean', 0):.0f}  latency_ms_p95={rp.get('latency_ms_p95', 0):.0f}")
+    else:
+        lines.append("rec_pipeline: (skipped - MongoDB unavailable)")
+
+    return "\n".join(lines)
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", "-o", type=str, default=None, help="Write results to this file (e.g. baselineVs.txt)")
+    args = parser.parse_args()
+
     print("Loading synthetic users...")
     with open(USERS_PATH) as f:
         users = json.load(f)
@@ -394,6 +435,16 @@ def main():
         for k in EVAL_KS:
             print(f"  Recall@{k}={results['rec_pipeline']['recall'][k]:.4f}  NDCG@{k}={results['rec_pipeline']['ndcg'][k]:.4f}  Hit@{k}={results['rec_pipeline']['hit_rate'][k]:.4f}")
         print(f"  Latency: mean={results['rec_pipeline']['latency_ms_mean']:.0f}ms  p95={results['rec_pipeline']['latency_ms_p95']:.0f}ms")
+
+    if args.output:
+        out_path = Path(args.output)
+        if not out_path.is_absolute():
+            out_path = ROOT / out_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        txt = _format_results_txt(results)
+        with open(out_path, "w") as f:
+            f.write(txt)
+        print(f"\nWrote results to {out_path}")
 
 
 if __name__ == "__main__":

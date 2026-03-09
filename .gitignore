@@ -28,8 +28,12 @@ frontend/out/
 .DS_Store
 Thumbs.db
 
-# DVC (model weights tracked by DVC, not Git)
+# DVC (model + metrics tracked by DVC, not Git)
 resources/two_tower_training/output/two_tower.pt
+resources/two_tower_training/output/retrain_metrics.txt
+resources/two_tower_training/output/baselineVs.txt
+# Regenerated from model, not tracked
+resources/two_tower_training/output/plant_embeddings.json
 
 # DVC
 .dvc/cache

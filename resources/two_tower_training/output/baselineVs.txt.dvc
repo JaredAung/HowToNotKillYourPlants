@@ -1,0 +1,5 @@
+outs:
+- md5: 7f2cc021046dc8c5e1aaf22a1eb0c23e
+  size: 462
+  hash: md5
+  path: baselineVs.txt

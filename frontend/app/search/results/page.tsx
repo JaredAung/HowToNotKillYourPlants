@@ -6,10 +6,12 @@ import { getExplanation, getToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { ExplanationDisplay } from "@/app/components/ExplanationDisplay";
 import { PlantCard, type PlantRec } from "@/app/components/PlantCard";
-import { navigateToAddToGarden } from "@/lib/addToGarden";
+import { setChatContext } from "@/lib/chatContext";
+import { addDirectlyToGarden } from "@/lib/addToGarden";
 
 const SEARCH_RESULTS_KEY = "searchExtractedProfile";
 const SEARCH_PLANTS_KEY = "searchExtractedPlants";
+const SEARCH_SEMANTIC_PLANTS_KEY = "searchSemanticPlants";
 
 type ProfileData = {
   username: string;
@@ -41,14 +43,18 @@ export default function SearchResultsPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [plants, setPlants] = useState<PlantRec[]>([]);
+  const [semanticPlants, setSemanticPlants] = useState<PlantRec[]>([]);
   const [explanationOn, setExplanationOn] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSuccessPlantId, setAddSuccessPlantId] = useState<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const storedProfile = sessionStorage.getItem(SEARCH_RESULTS_KEY);
     const storedPlants = sessionStorage.getItem(SEARCH_PLANTS_KEY);
+    const storedSemantic = sessionStorage.getItem(SEARCH_SEMANTIC_PLANTS_KEY);
     if (storedProfile) {
       try {
         setProfile(JSON.parse(storedProfile) as ProfileData);
@@ -63,7 +69,20 @@ export default function SearchResultsPage() {
         setPlants([]);
       }
     }
+    if (storedSemantic) {
+      try {
+        setSemanticPlants(JSON.parse(storedSemantic) as PlantRec[]);
+      } catch {
+        setSemanticPlants([]);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (addSuccessPlantId == null) return;
+    const t = setTimeout(() => setAddSuccessPlantId(null), 2000);
+    return () => clearTimeout(t);
+  }, [addSuccessPlantId]);
 
   useEffect(() => {
     if (!explanationOn) {
@@ -200,10 +219,14 @@ export default function SearchResultsPage() {
           })}
         </div>
 
+        {addError && (
+          <p className="text-sm text-rose-600 mt-4">{addError}</p>
+        )}
+
         {plants.length > 0 && (
           <div className="mt-8">
             <div className="flex items-center justify-between gap-4 mb-4">
-              <h2 className="text-lg font-semibold text-forest-800">Recommended plants</h2>
+              <h2 className="text-lg font-semibold text-forest-800">For your space</h2>
               <label className="flex items-center gap-2 cursor-pointer">
                 <span className="text-sm text-forest-600">Explanation</span>
                 <button
@@ -223,6 +246,9 @@ export default function SearchResultsPage() {
                 </button>
               </label>
             </div>
+            <p className="text-sm text-forest-600 mb-4">
+              Personalized by your profile and environment.
+            </p>
             {explanationOn && (
               <div className="mb-6 rounded-xl border border-sage-200 bg-white shadow-leaf p-5">
                 <h3 className="text-base font-semibold text-forest-800 mb-3 flex items-center gap-2">
@@ -238,10 +264,67 @@ export default function SearchResultsPage() {
                   p.rerank_score != null
                     ? Math.round(p.rerank_score * 100)
                     : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
-                return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={(plant) => navigateToAddToGarden(plant, router)} />;
+                return (
+                  <PlantCard
+                    key={p.plant_id}
+                    p={p}
+                    matchPct={matchPct}
+                    isJustAdded={addSuccessPlantId === p.plant_id}
+                    onAdd={async (plant) => {
+                      try {
+                        setAddError(null);
+                        await addDirectlyToGarden(plant);
+                        setAddSuccessPlantId(plant.plant_id);
+                      } catch (err) {
+                        setAddError(err instanceof Error ? err.message : "Failed to add");
+                      }
+                    }}
+                    onTalkToAgent={(plant) => {
+                      setChatContext(plant, plants.slice(0, 5));
+                      router.push("/chat");
+                    }}
+                  />
+                );
               })}
             </div>
           </div>
+        )}
+
+        {semanticPlants.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-lg font-semibold text-forest-800 mb-2">Matches your description</h2>
+            <p className="text-sm text-forest-600 mb-4">
+              By similarity to what you wrote.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {semanticPlants.map((p) => (
+                  <PlantCard
+                    key={p.plant_id}
+                    p={p}
+                    matchPct={0}
+                    showMatchPct={false}
+                    isJustAdded={addSuccessPlantId === p.plant_id}
+                    onAdd={async (plant) => {
+                      try {
+                        setAddError(null);
+                        await addDirectlyToGarden(plant);
+                        setAddSuccessPlantId(plant.plant_id);
+                      } catch (err) {
+                        setAddError(err instanceof Error ? err.message : "Failed to add");
+                      }
+                    }}
+                    onTalkToAgent={(plant) => {
+                      setChatContext(plant, semanticPlants.slice(0, 5));
+                      router.push("/chat");
+                    }}
+                  />
+                ))}
+            </div>
+          </div>
+        )}
+
+        {plants.length === 0 && semanticPlants.length === 0 && (
+          <p className="text-forest-600 text-sm mt-8">No plants found. Try a different search.</p>
         )}
 
         <div className="mt-6 flex gap-3">

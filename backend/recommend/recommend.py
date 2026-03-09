@@ -62,6 +62,7 @@ def recommend_for_profile(
     username: str,
     k: int = DEFAULT_TOP_K,
     use_rerank: bool | None = None,
+    use_death_penalty: bool | None = None,
 ) -> dict:
     """
     Run recommendation pipeline for a given profile.
@@ -130,7 +131,8 @@ def recommend_for_profile(
         query = _user_profile_to_query(profile)  # Uses profile param only, not MongoDB
         results = _rerank_with_cohere(query, results, k)
 
-    if USE_DEATH_PENALTY and results:
+    apply_death = use_death_penalty if use_death_penalty is not None else USE_DEATH_PENALTY
+    if apply_death and results:
         results = _apply_death_penalty(plant_coll, results, username, k)
 
     return {"username": username, "plants": results}

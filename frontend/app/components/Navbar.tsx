@@ -3,10 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { extractSearchProfile, getToken, logOut } from "@/lib/api";
+import { extractSearchProfile, getToken, logOut, semanticSearch } from "@/lib/api";
 
 const SEARCH_RESULTS_KEY = "searchExtractedProfile";
 const SEARCH_PLANTS_KEY = "searchExtractedPlants";
+const SEARCH_SEMANTIC_PLANTS_KEY = "searchSemanticPlants";
 
 const navItems = [
   { href: "/profile", label: "Profile" },
@@ -27,17 +28,22 @@ export default function Navbar() {
     if (!searchText.trim()) return;
     setSearchLoading(true);
     setSearchError(null);
+    const text = searchText.trim();
     try {
-      const res = await extractSearchProfile(searchText);
+      const [extractRes, semanticRes] = await Promise.all([
+        extractSearchProfile(text),
+        semanticSearch(text, 20),
+      ]);
       if (typeof window !== "undefined") {
-        sessionStorage.setItem(SEARCH_RESULTS_KEY, JSON.stringify(res.profile));
-        sessionStorage.setItem(SEARCH_PLANTS_KEY, JSON.stringify(res.plants ?? []));
+        sessionStorage.setItem(SEARCH_RESULTS_KEY, JSON.stringify(extractRes.profile));
+        sessionStorage.setItem(SEARCH_PLANTS_KEY, JSON.stringify(extractRes.plants ?? []));
+        sessionStorage.setItem(SEARCH_SEMANTIC_PLANTS_KEY, JSON.stringify(semanticRes.plants ?? []));
       }
       setSearchOpen(false);
       setSearchText("");
       router.push("/search/results");
     } catch (err) {
-      setSearchError(err instanceof Error ? err.message : "Failed to extract");
+      setSearchError(err instanceof Error ? err.message : "Search failed");
     } finally {
       setSearchLoading(false);
     }
@@ -94,7 +100,7 @@ export default function Navbar() {
                     disabled={searchLoading || !searchText.trim()}
                     className="mt-2 w-full py-2 rounded-lg bg-forest-600 text-white text-sm font-medium hover:bg-forest-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {searchLoading ? "Extracting..." : "Extract profile"}
+                    {searchLoading ? "Searching..." : "Search"}
                   </button>
                 </div>
               </>

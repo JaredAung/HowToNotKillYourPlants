@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { PlantCard, type PlantRec } from "@/app/components/PlantCard";
 import { ExplanationDisplay } from "@/app/components/ExplanationDisplay";
 import { setChatContext } from "@/lib/chatContext";
+import { addDirectlyToGarden } from "@/lib/addToGarden";
 
 type RecResponse = { username?: string; plants?: PlantRec[]; message?: string; explanation?: string };
 
@@ -18,6 +19,7 @@ export default function Home() {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addSuccessPlantId, setAddSuccessPlantId] = useState<number | null>(null);
 
   const fetchRecs = (forceRefresh = false) => {
     const token = getToken();
@@ -36,6 +38,12 @@ export default function Home() {
   useEffect(() => {
     fetchRecs();
   }, []);
+
+  useEffect(() => {
+    if (addSuccessPlantId == null) return;
+    const t = setTimeout(() => setAddSuccessPlantId(null), 2000);
+    return () => clearTimeout(t);
+  }, [addSuccessPlantId]);
 
   useEffect(() => {
     if (!explanationOn) {
@@ -132,7 +140,27 @@ export default function Home() {
                         p.rerank_score != null
                           ? Math.round(p.rerank_score * 100)
                           : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
-                      return <PlantCard key={p.plant_id} p={p} matchPct={matchPct} onPick={(plant) => { setChatContext(plant, plants.slice(0, 5)); router.push("/chat"); }} />;
+                      return (
+                        <PlantCard
+                          key={p.plant_id}
+                          p={p}
+                          matchPct={matchPct}
+                          isJustAdded={addSuccessPlantId === p.plant_id}
+                          onAdd={async (plant) => {
+                            try {
+                              setError(null);
+                              await addDirectlyToGarden(plant);
+                              setAddSuccessPlantId(plant.plant_id);
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Failed to add");
+                            }
+                          }}
+                          onTalkToAgent={(plant) => {
+                            setChatContext(plant, plants.slice(0, 5));
+                            router.push("/chat");
+                          }}
+                        />
+                      );
                     })}
                   </div>
                 ) : (

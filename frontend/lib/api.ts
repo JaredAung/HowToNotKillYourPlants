@@ -218,6 +218,28 @@ export async function extractSearchProfile(text: string) {
   return res.json();
 }
 
+export async function semanticSearch(query: string, k = 20) {
+  const token = getToken();
+  if (!token) throw new Error("Not logged in");
+  const res = await fetch(`${API_BASE}/search/semantic/query`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query, k }),
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      throw new Error("Session expired");
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || "Semantic search failed");
+  }
+  return res.json();
+}
+
 export async function addToGarden(plantId: number, customName?: string) {
   const token = getToken();
   if (!token) throw new Error("Not logged in");
