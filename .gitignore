@@ -38,3 +38,4 @@ resources/two_tower_training/output/plant_embeddings.json
 # DVC
 .dvc/cache
 .dvc/tmp
+

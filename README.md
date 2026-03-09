@@ -38,9 +38,9 @@ Recommendations are based on **real user conditions**, including:
 * Watering habits
 * Care difficulty tolerance
 
-### 🔄 Continuous Retraining
+### 🔄 Continuous Learning Pipeline
 
-The model can be **retrained on real user data** — garden plants, deaths, and synthetic interactions. Real interactions are weighted higher. Run `python -m backend.recommend.retrain.retrain_two_tower` to retrain from production data.
+The model **retrains on real user data** — garden plants, deaths, and synthetic interactions — via a **Prefect-orchestrated pipeline** that runs on a schedule. Real interactions are weighted higher; each retrain incorporates the latest failures and successes.
 
 ### 📦 DVC Model Versioning
 
@@ -48,35 +48,34 @@ Model weights are versioned with **DVC** and stored in Google Drive. Track model
 
 ---
 
+# 📊 Dataset
+
+| Component | Count / Details |
+| --------- | --------------- |
+| **Plant catalog** | 400 plants |
+| **Plant features** | Structured features (light, humidity, water, temp, care level, size, climate) + description embeddings (Voyage) |
+| **Synthetic interactions** | 1,000 users, ~99,900 interactions |
+| **Real interactions (MongoDB)** | Garden adds (positive), plant deaths (negative), sampled negatives |
+
+---
+
 # 🏗 System Architecture
+
+End-to-end flow from user request to recommendations:
 
 ```mermaid
 flowchart TD
-
-User[User Profile]
-PlantDB[(Plant Database)]
-
-User --> UserEmbedding
-PlantDB --> PlantEmbedding
-
-UserEmbedding[User Tower]
-PlantEmbedding[Plant Tower]
-
-UserEmbedding --> VectorSearch
-PlantEmbedding --> VectorSearch
-
-VectorSearch[MongoDB Vector Search]
-
-VectorSearch --> Reranker
-
-Reranker[Cohere Reranker]
-
-Reranker --> DeathPenalty
-
-DeathPenalty[Death Similarity Penalty]
-
-DeathPenalty --> Results[Final Recommendations]
+    User[User]
+    User --> NextJS[Next.js Frontend]
+    NextJS --> FastAPI[FastAPI Backend]
+    FastAPI --> TwoTower[Two-Tower Model]
+    TwoTower --> MongoVec[(MongoDB Vector Search)]
+    MongoVec --> Cohere[Cohere Reranker]
+    Cohere --> DeathPenalty[Death Penalty]
+    DeathPenalty --> Results[Final Recommendations]
 ```
+
+**Component flow:** User → Next.js frontend → FastAPI backend → Two-Tower model (user embedding) → MongoDB vector search (plant embeddings) → Cohere semantic reranker → death penalty → ranked results.
 
 ---
 
@@ -118,21 +117,16 @@ DotProduct --> Score[Similarity Score]
 
 ---
 
-# 🔄 Death-Learning Feedback Loop
+# 🧠 Training Objective
 
-```mermaid
-flowchart TD
+The two-tower model is trained as a **binary compatibility classifier**.
 
-User[User adds plant to garden]
-User --> Garden[(Garden)]
-Garden --> PlantDies[Plant dies]
-PlantDies --> DeathReport[Death Report Form]
-DeathReport --> DeathDB[(PlantDeathCollection)]
-DeathDB --> Penalty[Death Penalty in Recommendations]
-Penalty --> AvoidSimilar[Avoid similar plants]
-AvoidSimilar --> BetterRecs[Better recommendations]
-BetterRecs --> User
-```
+| Sample type | Source |
+| ----------- | ------ |
+| **Positive** | Plants added to user garden |
+| **Negative** | Death reports, sampled plants not in garden |
+
+**Loss function:** Binary Cross Entropy with weighted samples. Real interactions (garden adds, deaths) are weighted higher than synthetic data to ensure the model learns from production feedback.
 
 ---
 
@@ -181,15 +175,78 @@ This improves ranking quality beyond structured matching.
 
 ## 3️⃣ Failure-Aware Learning (Death Penalty)
 
-If a plant dies, the system **learns from that failure**.
+If a plant dies, the system **learns from that failure** — for now, via a **temporary runtime penalty**.
 
-Plants similar to previously dead plants receive a **score penalty**.
+Plants similar to previously dead plants receive a **score penalty**:
 
 ```
 final_score = base_score − λ × similarity_to_dead_plants
 ```
 
-This prevents recommending plants that **historically failed for the user**.
+λ controls how strongly past failures affect ranking. This prevents recommending plants that **historically failed for the user**. The penalty is **temporary**: it applies only until the next scheduled retrain, when the model is updated with the latest interaction data and learns failures directly in its weights.
+
+---
+
+# 🔄 Death-Learning Feedback Loop
+
+When a user reports a plant death, that signal flows back into the system:
+
+```mermaid
+flowchart TD
+
+User[User adds plant to garden]
+User --> Garden[(Garden)]
+Garden --> PlantDies[Plant dies]
+PlantDies --> DeathReport[Death Report Form]
+DeathReport --> DeathDB[(PlantDeathCollection)]
+DeathDB --> Penalty[Death Penalty in Recommendations]
+Penalty --> AvoidSimilar[Avoid similar plants]
+AvoidSimilar --> BetterRecs[Better recommendations]
+BetterRecs --> User
+```
+
+**How it works:** Death reports are stored in `PlantDeathCollection`. Until the next retrain, the **death penalty** (section 3 above) down-ranks plants similar to those that died. After retraining, the model itself encodes these failures — the penalty remains as a safeguard, but the model has already learned to avoid them.
+
+---
+
+# 🔄 Automated Retraining Pipeline
+
+The system improves over time by **retraining on real user data**. The pipeline is orchestrated with **Prefect** and can run on a schedule (e.g. nightly).
+
+```mermaid
+flowchart TD
+    subgraph Data["1. Data Loading"]
+        Synthetic[(Synthetic Users & Interactions)]
+        Mongo[(MongoDB: Garden + Deaths)]
+        Synthetic --> Merge[Merge & Subsample]
+        Mongo --> Merge
+    end
+
+    subgraph Train["2. Retrain Script"]
+        Merge --> Split[Train/Val Split]
+        Split --> TrainLoop[Train Two-Tower Model]
+        TrainLoop --> DeathEval[Death Feedback Eval]
+        DeathEval --> Embed[Compute Plant Embeddings]
+        Embed --> Save[Save two_tower.pt, retrain_metrics.txt]
+        Save --> MongoUpdate[Update MongoDB PlantCollection]
+        Save --> DVCAdd1[dvc add model + metrics]
+    end
+
+    subgraph Eval["3. Eval (optional)"]
+        MongoUpdate --> BaselineEval[Baseline vs Rec Pipeline Eval]
+        BaselineEval --> BaselineVs[baselineVs.txt]
+        BaselineVs --> DVCAdd2[dvc add baselineVs.txt]
+    end
+
+    subgraph Version["4. Versioning"]
+        DVCAdd1 --> DVCPush
+        DVCAdd2 --> DVCPush[dvc push → Google Drive]
+    end
+```
+
+**Flow (Prefect):** `retrain` → `eval` (baseline vs rec) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
+
+**Death penalty vs retraining:** The death penalty is a **short-term** fix until the next retrain. Once retraining runs with the latest garden and death data, the model learns failures directly; the penalty continues to provide an extra safety margin.
 
 ---
 
@@ -223,6 +280,8 @@ This prevents recommending plants that **historically failed for the user**.
 | Recall     | +34% | +73% | +114% |
 | NDCG       | +41% | +57% | +85%  |
 | Hit Rate   | +38% | +36% | +35%  |
+
+**Latency:** The pipeline (~1049 ms) is ~40× slower than the baseline (~25 ms). Latency is primarily introduced by the **semantic reranking stage** (~900 ms via Cohere API). Future optimizations: replace external reranker with a local cross-encoder, cache plant embeddings, reduce candidate size before reranking.
 
 ---
 
@@ -289,6 +348,32 @@ Fields include:
 * Room temperature
 
 Death reports expire after **30 days using MongoDB TTL indexes**.
+
+---
+
+# 📸 Application Screenshots
+
+| Page | Description |
+| ---- | ----------- |
+| Recommendation page | Top plant suggestions with AI explanations |
+| Plant details page | Care profile, light/water/humidity requirements |
+| Death reporting form | Contextual feedback when a plant dies |
+| Chat assistant | Natural language plant exploration |
+| Garden page | User's tracked plants |
+
+*Add screenshots to showcase the application.*
+
+---
+
+# 🚀 Deployment Architecture
+
+| Component | Platform |
+| --------- | -------- |
+| **Frontend** | Vercel |
+| **Backend** | FastAPI (Railway / Fly.io) |
+| **Database** | MongoDB Atlas |
+| **Retraining** | Prefect workflow |
+| **Artifacts** | DVC + Google Drive |
 
 ---
 
