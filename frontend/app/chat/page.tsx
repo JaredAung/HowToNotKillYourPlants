@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getChatContext, clearChatContext } from "@/lib/chatContext";
 import { invokeChat, getToken, type ChatMessage } from "@/lib/api";
 import type { PlantRec } from "@/app/components/PlantCard";
+import { MarkdownContent } from "@/app/components/MarkdownContent";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -161,13 +162,15 @@ export default function ChatPage() {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-5 py-4 ${
                   msg.role === "user"
-                    ? "bg-forest-600 text-white"
+                    ? "bg-forest-600 text-white shadow-md"
                     : "bg-white border border-sage-200 shadow-sm text-forest-800"
                 }`}
               >
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                <div className="text-sm leading-relaxed [&_.markdown-content_p]:my-1.5 [&_.markdown-content_ul]:my-2 [&_.markdown-content_strong]:font-semibold">
+                  <MarkdownContent content={msg.content} />
+                </div>
               </div>
             </div>
           ))}

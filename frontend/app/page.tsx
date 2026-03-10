@@ -29,7 +29,7 @@ export default function Home() {
     }
     setLoading(true);
     setError(null);
-    getRecommendations({ use_rerank: false, forceRefresh })
+    getRecommendations({ forceRefresh })
       .then((data) => setRecommendations(data as RecResponse))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));

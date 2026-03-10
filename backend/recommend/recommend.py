@@ -16,7 +16,7 @@ import logging
 from auth.jwt import get_current_username
 from database import get_plant_collection, get_user_collection
 from garden.death import get_dead_plant_ids
-from llm import chat_simple
+from llm import gemini_generate
 from recommend.cache import get_cached, inspect_cache, set_cached
 from recommend.feature_loader import compute_user_embedding, score_plants
 
@@ -329,9 +329,7 @@ def _format_plant_for_llm(p: dict) -> str:
 
 
 def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
-    """Use Ollama to explain why these plants match the user. Returns empty string on error."""
-    import logging
-
+    """Use Google GenAI (Gemini) via LangChain to explain why these plants match the user. Returns empty string on error."""
     if not top_plants:
         return ""
     profile_text = _user_profile_to_query(user).replace(" ", ", ")
@@ -353,10 +351,9 @@ def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
         f"Explain why each plant is a good match for {user_name}. Use the format: • **Name (Latin)**: explanation"
     )
     try:
-        out = chat_simple(user_message=user_msg, system=system)
-        return (out or "").strip()
+        return gemini_generate(system=system, user_message=user_msg)
     except Exception as e:
-        logging.warning("Ollama explanation failed: %s", e)
+        logging.warning("Gemini explanation failed: %s", e)
         return ""
 
 

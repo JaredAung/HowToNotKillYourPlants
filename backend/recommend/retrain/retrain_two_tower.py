@@ -99,7 +99,7 @@ def _load_real_interactions() -> tuple[list[dict], dict[int, dict]]:
         from database import get_death_collection, get_garden_collection, get_user_collection
     except ImportError:
         print("  MongoDB not available. Skipping real interactions.")
-        return [], {}
+        return [], {}, []
 
     user_coll = get_user_collection()
     garden_coll = get_garden_collection()
@@ -151,7 +151,8 @@ def _load_real_interactions() -> tuple[list[dict], dict[int, dict]]:
         n_garden += 1
     print(f"  Retrieved {n_garden} plants from garden")
 
-    # Deaths: explicit negatives
+    # Deaths: explicit negatives (load all; mark used_in_retraining=true after retrain to stop death penalty)
+    death_records_used: list[tuple[str, int]] = []
     n_deaths = 0
     for doc in death_coll.find({}, {"username": 1, "plant_id": 1}):
         username = doc.get("username")
@@ -160,6 +161,7 @@ def _load_real_interactions() -> tuple[list[dict], dict[int, dict]]:
             continue
         get_user_id(username)
         user_death_pids.setdefault(username, set()).add(plant_id)
+        death_records_used.append((username, plant_id))
         n_deaths += 1
     print(f"  Retrieved {n_deaths} death records")
 
@@ -202,7 +204,7 @@ def _load_real_interactions() -> tuple[list[dict], dict[int, dict]]:
                     })
 
     if not interactions:
-        return [], {}
+        return [], {}, []
 
     n_pos = sum(1 for r in interactions if r["label"] == 1)
     n_neg = sum(1 for r in interactions if r["label"] == 0)
@@ -224,14 +226,17 @@ def _load_real_interactions() -> tuple[list[dict], dict[int, dict]]:
     # Filter interactions to users we have profiles for
     valid_uids = set(users_by_id.keys())
     interactions = [r for r in interactions if r["user_id"] in valid_uids]
+    # Keep only death_records_used for users we have profiles for
+    valid_usernames = {u for u, uid in username_to_id.items() if uid in valid_uids}
+    death_records_used = [(u, p) for u, p in death_records_used if u in valid_usernames]
     dropped = len(username_to_id) - len(valid_uids)
     if dropped > 0:
         print(f"  Dropped interactions for {dropped} users without profiles")
-    return interactions, users_by_id
+    return interactions, users_by_id, death_records_used
 
 
-def _load_merged_interactions(include_real: bool) -> tuple[list[dict], dict[int, dict], dict[int, dict], list[tuple[int, int]]]:
-    """Load synthetic + optional real interactions. Returns (interactions, users, plants, death_pairs)."""
+def _load_merged_interactions(include_real: bool) -> tuple[list[dict], dict[int, dict], dict[int, dict], list[tuple[int, int]], list[tuple[str, int]]]:
+    """Load synthetic + optional real interactions. Returns (interactions, users, plants, death_pairs, death_records_used)."""
     interactions_path = INTERACTIONS_PATH if INTERACTIONS_PATH.exists() else INTERACTIONS_PATH_ALT
     if not interactions_path.exists():
         raise FileNotFoundError(
@@ -255,12 +260,14 @@ def _load_merged_interactions(include_real: bool) -> tuple[list[dict], dict[int,
     for r in interactions:
         r.setdefault("weight", WEIGHT_OLDER)
 
+    death_records_used: list[tuple[str, int]] = []
+    real_interactions: list[dict] = []
     if include_real:
         print("  Loading real interactions from MongoDB...")
-        real_interactions, real_users = _load_real_interactions()
+        real_interactions, real_users, death_records_used = _load_real_interactions()
         if not real_interactions:
             print("  No real interactions found in MongoDB (empty garden/death collections)")
-            return interactions, users, plants, []
+            return interactions, users, plants, [], []
         elif real_interactions:
             # Filter to plant_ids that exist in catalog
             valid_pids = set(plants.keys())
@@ -288,7 +295,7 @@ def _load_merged_interactions(include_real: bool) -> tuple[list[dict], dict[int,
     if include_real and real_interactions:
         death_pairs = [(r["user_id"], r["plant_id"]) for r in real_interactions if r["label"] == 0 and r.get("weight") == WEIGHT_DEATH]
 
-    return interactions, users, plants, death_pairs
+    return interactions, users, plants, death_pairs, death_records_used
 
 
 class WeightedUserPlantDataset(ttt.UserPlantDataset):
@@ -389,6 +396,27 @@ def _update_mongo_embeddings(plant_embeddings: list[dict]) -> int:
     return updated
 
 
+def _mark_deaths_used_in_retraining(death_records: list[tuple[str, int]]) -> int:
+    """Mark death records as used_in_retraining=True after successful retrain. Returns count updated."""
+    if not death_records:
+        return 0
+    try:
+        from database import get_death_collection
+    except ImportError:
+        print("MongoDB not available. Skip marking deaths used.")
+        return 0
+
+    death_coll = get_death_collection()
+    updated = 0
+    for username, plant_id in death_records:
+        result = death_coll.update_many(
+            {"username": username, "plant_id": plant_id},
+            {"$set": {"used_in_retraining": True}},
+        )
+        updated += result.modified_count
+    return updated
+
+
 def main():
     include_real = "--no-include-real" not in sys.argv  # default True
     update_mongo = "--no-update-mongo" not in sys.argv  # default True
@@ -407,7 +435,7 @@ def main():
         print("Mode: synthetic only (pass --no-include-real to skip real garden/death data)")
 
     print("Loading data...")
-    interactions, users, plants, death_pairs = _load_merged_interactions(include_real)
+    interactions, users, plants, death_pairs, death_records_used = _load_merged_interactions(include_real)
     # Count real vs synthetic users (real get user_id > max synthetic)
     with open(USERS_PATH) as f:
         syn_user_ids = {u["user_id"] for u in json.load(f) if "user_id" in u}
@@ -604,6 +632,10 @@ def main():
         print("Updating MongoDB PlantCollection...")
         n = _update_mongo_embeddings(plant_embeds)
         print(f"Updated {n} plants in MongoDB PlantCollection")
+
+    if death_records_used:
+        n_marked = _mark_deaths_used_in_retraining(death_records_used)
+        print(f"Marked {n_marked} death records as used_in_retraining=True")
 
     if dvc_add:
         print("Adding model and metrics to DVC...")

@@ -375,6 +375,8 @@ Death reports expire after **30 days using MongoDB TTL indexes**.
 | **Retraining** | Prefect workflow |
 | **Artifacts** | DVC + Google Drive |
 
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment instructions.
+
 ---
 
 # 🧩 Technology Stack
@@ -461,6 +463,11 @@ USE_RERANK=true
 USE_DEATH_PENALTY=true
 DEATH_PENALTY_LAMBDA=0.5
 NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# LLM (chat assistant): USE_GEMINI=true (default) or false for Ollama
+USE_GEMINI=true
+# For Gemini: GEMINI_API_KEY=... and optionally GEMINI_MODEL=gemini-2.5-flash
+# For Ollama: OLLAMA_HOST=http://localhost:11434, OLLAMA_MODEL=llama3.2
 ```
 
 ---

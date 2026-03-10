@@ -87,6 +87,7 @@ def mark_plant_dead(
         "death_reason": body.death_reason.strip() if body.death_reason else None,
         "plant_profile": body.plant_profile,
         "user_profile": body.user_profile,
+        "used_in_retraining": False,
     }
     death_coll.insert_one(death_doc)
 
@@ -96,7 +97,11 @@ def mark_plant_dead(
 
 
 def get_dead_plant_ids(username: str) -> list[int]:
-    """Return list of plant_ids the user has marked as dead. Used for death penalty in recommendations."""
+    """Return plant_ids the user has marked as dead that are NOT yet used in retraining.
+    Only these are used for death penalty (until the model learns them)."""
     death_coll = get_death_collection()
-    docs = death_coll.find({"username": username}, {"plant_id": 1})
+    docs = death_coll.find(
+        {"username": username, "$or": [{"used_in_retraining": False}, {"used_in_retraining": {"$exists": False}}]},
+        {"plant_id": 1},
+    )
     return list({d["plant_id"] for d in docs})

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from auth.jwt import get_current_username
 from database import get_user_collection
-from llm import chat_simple
+from llm import gemini_generate
 from recommend.feature_loader import normalize_profile
 from recommend.recommend import recommend_for_profile
 
@@ -163,7 +163,7 @@ def extract_profile(
     )
 
     try:
-        out = chat_simple(user_message=user_msg, system=system)
+        out = gemini_generate(system=system, user_message=user_msg)
         extracted = _parse_extracted(out or "")
     except Exception as e:
         logging.warning("Search extract LLM failed: %s", e)
