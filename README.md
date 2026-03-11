@@ -10,6 +10,8 @@ V1 : [HowToNotKillYourIndoorPlants](https://github.com/JaredAung/HowToNotKillYou
 
 ---
 
+Live Website : [https://how-to-not-kill-your-plants.vercel.app] 
+
 # 🚀 Key Innovations
 
 ### 🧠 ML Recommendation Engine
