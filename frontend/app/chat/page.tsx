@@ -147,7 +147,13 @@ export default function ChatPage() {
             <div className="rounded-xl border border-sage-200 bg-white p-4 text-forest-600 text-sm">
               {selectedPlant ? (
                 <p>
-                  Ask about <strong>{selectedPlant.common_name ?? selectedPlant.latin ?? "this plant"}</strong> or explore others.
+                  Ask about <strong>
+                    {typeof selectedPlant.common_name === "string"
+                      ? selectedPlant.common_name
+                      : typeof selectedPlant.latin === "string"
+                        ? selectedPlant.latin
+                        : "this plant"}
+                  </strong> or explore others.
                 </p>
               ) : recommendedPlants.length > 0 ? (
                 <p>Ask about your recommendations or any plant you&apos;re curious about.</p>
