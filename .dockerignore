@@ -1,0 +1,79 @@
+# -----------------------------
+# Git
+# -----------------------------
+.git
+.gitignore
+
+# -----------------------------
+# Python cache
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# -----------------------------
+# Environments
+# -----------------------------
+.env
+.venv
+venv
+env
+
+# -----------------------------
+# Node / frontend build
+# -----------------------------
+node_modules
+frontend/node_modules
+frontend/.next
+frontend/.nuxt
+
+# -----------------------------
+# Notebooks
+# -----------------------------
+notebooks
+
+# -----------------------------
+# Data / ML artifacts
+# -----------------------------
+datasets
+data
+artifacts
+models
+checkpoints
+logs
+tmp
+uploads
+
+# -----------------------------
+# Model formats
+# -----------------------------
+*.ckpt
+*.onnx
+*.h5
+*.pkl
+*.joblib
+*.bin
+
+# -----------------------------
+# Resources: only two_tower.pt (exclude rest)
+# -----------------------------
+resources/*
+!resources/two_tower_training/
+resources/two_tower_training/*
+!resources/two_tower_training/output/
+resources/two_tower_training/output/*
+!resources/two_tower_training/output/two_tower.pt
+
+# -----------------------------
+# Local dev files
+# -----------------------------
+*.log
+*.sqlite
+*.db
+
+# -----------------------------
+# OS files
+# -----------------------------
+.DS_Store
+Thumbs.db
