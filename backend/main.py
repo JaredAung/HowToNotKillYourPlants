@@ -27,7 +27,10 @@ from recommend.recommend import router as recommend_router
 from search.search import router as search_router
 
 app = FastAPI()
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").strip().split(",")
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,https://how-to-not-kill-your-plants.vercel.app",
+).strip().split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _cors_origins if o.strip()],
