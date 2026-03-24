@@ -36,10 +36,8 @@ from recommend.feature_loader import normalize_profile
 from recommend.recommend import recommend_for_profile
 
 # Paths
-USERS_PATH = ROOT / "resources" / "synthetic_users.json"
-PLANTS_PATH = ROOT / "resources" / "plant_profiles.json"
-if not PLANTS_PATH.exists():
-    PLANTS_PATH = ROOT / "resources" / "data_creating" / "plant_profiles.json"
+USERS_PATH = ROOT / "resources" / "data" / "synthetic_users.json"
+PLANTS_PATH = ROOT / "resources" / "data_creating" / "plant_profiles.json"
 
 # Oracle (from two_tower_training)
 ORACLE_POS_THRESHOLD = 0.75

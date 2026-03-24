@@ -15,7 +15,7 @@ import voyageai
 ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
-PLANTS_PATH = ROOT / "resources" / "plant_profiles.json"
+PLANTS_PATH = ROOT / "resources" / "data_creating" / "plant_profiles.json"
 EMBED_MODEL = "voyage-4-lite"
 DEFAULT_K = 20
 

@@ -39,4 +39,8 @@ resources/two_tower_training/output/plant_embeddings.json
 .dvc/cache
 .dvc/tmp
 
+# Feast (generated parquet and local store)
+feature_repo/data/*.parquet
+feature_repo/data/*.db
+
 

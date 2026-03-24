@@ -1,0 +1,256 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "permapeople-plants-sample",
+  "title": "Permapeople Plants Sample Schema",
+  "description": "Full schema for resources/permapeople_plants_sample.json",
+  "type": "object",
+  "required": ["plants"],
+  "properties": {
+    "plants": {
+      "type": "array",
+      "description": "List of plant records",
+      "items": { "$ref": "#/definitions/Plant" }
+    }
+  },
+  "definitions": {
+    "Plant": {
+      "type": "object",
+      "required": ["id", "name", "slug"],
+      "description": "A single plant record from Permapeople API",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Unique plant identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Common name"
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe identifier (e.g. cucurbita-moschata-squash)"
+        },
+        "scientific_name": {
+          "type": ["string", "null"],
+          "description": "Latin / botanical name"
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Long-form text description"
+        },
+        "data": {
+          "type": "array",
+          "description": "Key-value attributes (variable per plant)",
+          "items": { "$ref": "#/definitions/DataEntry" }
+        },
+        "created_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO 8601 creation timestamp"
+        },
+        "updated_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO 8601 last update timestamp"
+        },
+        "parent_id": {
+          "type": ["integer", "null"],
+          "description": "Parent plant ID for varieties/cultivars"
+        },
+        "adopter_id": {
+          "type": ["integer", "null"],
+          "description": "Adopter / maintainer ID"
+        },
+        "version": {
+          "type": ["integer", "null"],
+          "description": "Record version number"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Plant"],
+          "description": "Record type"
+        },
+        "link": {
+          "type": ["string", "null"],
+          "description": "Relative path (e.g. /plants/cucurbita-moschata-squash)"
+        },
+        "images": {
+          "type": ["object", "null"],
+          "description": "Image URLs",
+          "properties": {
+            "thumb": {
+              "type": "string",
+              "format": "uri",
+              "description": "Thumbnail image URL"
+            },
+            "title": {
+              "type": "string",
+              "format": "uri",
+              "description": "Primary / title image URL"
+            }
+          }
+        },
+        "care_level": {
+          "type": ["string", "null"],
+          "enum": ["easy", "medium", "hard"],
+          "description": "Estimated care difficulty: easy (<40), medium (40-59), hard (60+)"
+        },
+        "difficulty_score": {
+          "type": ["number", "null"],
+          "description": "Numeric difficulty 0-100 (higher = harder)"
+        }
+      }
+    },
+    "DataEntry": {
+      "type": "object",
+      "required": ["key", "value"],
+      "description": "Single attribute key-value pair in plant.data",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Attribute name"
+        },
+        "value": {
+          "type": "string",
+          "description": "Attribute value"
+        }
+      }
+    }
+  },
+  "environment": [
+    "USDA Hardiness zone",
+    "Light requirement",
+    "Water requirement",
+    "Soil type",
+    "Soil pH",
+    "Drought resistant",
+    "Root depth",
+    "Root type",
+    "Height",
+    "Width",
+    "Spacing",
+    "Life cycle",
+    "Layer",
+    "Growth",
+    "Pollination",
+    "Habitat",
+    "Nitrogen Fixing",
+    "Nitrogen Usage",
+    "Propagation method",
+    "Propagation - Cuttings",
+    "Propagation - Direct sowing",
+    "Propagation - Transplanting",
+    "When to sow (indoors)",
+    "When to sow (outdoors)",
+    "When to plant (transplant)",
+    "When to plant (cuttings)",
+    "When to plant (division)",
+    "When to start indoors (weeks)",
+    "When to start outdoors (weeks)",
+    "Germination temperature",
+    "Germination time",
+    "Cold stratification temperature",
+    "Cold stratification time",
+    "Seed planting depth",
+    "Seed viability",
+    "1000 Seed Weight (g)",
+    "Days to maturity",
+    "Days to harvest"
+  ],
+  "info": [
+    "Alternate name",
+    "Family",
+    "Genus",
+    "Native to",
+    "Introduced into",
+    "Wikipedia",
+    "Plants For A Future",
+    "Plants of the World Online",
+    "Plants of the World Online Name (Synonym)",
+    "Plants of the World Online Link (Synonym)",
+    "North Carolina Extension Gardener Plant Toolbox",
+    "PIEDMONT NATIVE PLANTS: A GUIDE FOR LANDSCAPES AND GARDENS, 2ND EDITION",
+    "Frontiers in Pharmacology",
+    "Edible",
+    "Edible parts",
+    "Edible uses",
+    "Medicinal",
+    "Medicinal parts",
+    "Utility",
+    "Leaves"
+  ],
+  "problems": [
+    "Diseases",
+    "Pests",
+    "Warning"
+  ],
+  "unique_values": {
+    "environment": {
+      "USDA Hardiness zone": "10+",
+      "Light requirement": ["Full sun", "Full sun, Partial sun/shade", "Full sun, Partial sun/shade, Full shade", "Partial sun/shade", "Partial sun/shade, Full shade", "Partial sun/shade, Full sun"],
+      "Water requirement": ["Dry", "Dry, Moist", "Dry, Moist, Wet", "Moist", "Moist, Wet", "Moist, Wet, Water", "Moist, wet, Water", "Water", "Wet", "Wet, Water"],
+      "Soil type": ["Light (sandy)", "Light (sandy), Medium", "Light (sandy), Medium, Acidic", "Light (sandy), Medium, Heavy (clay)", "Medium", "Medium, Heavy (clay)"],
+      "Soil pH": "10+",
+      "Drought resistant": ["False", "True", "true"],
+      "Root depth": ["0.6-6m", "3-8inches", "60cm", "Deep", "Shallow"],
+      "Root type": ["Bulb", "Fasciculated", "Fibrous", "Tap"],
+      "Height": "10+",
+      "Width": "10+",
+      "Spacing": "10+",
+      "Life cycle": ["Annual", "Annual, Biennial", "Annual, Perennial", "Biennial", "Biennial, Perennial", "Perennial"],
+      "Layer": ["Ground cover, Herbs", "Herbs", "Roots", "Shrubs", "Tall trees", "Trees", "Understory", "Vines"],
+      "Growth": ["Fast", "Medium", "Slow"],
+      "Pollination": ["Self-incompatible"],
+      "Habitat": ["Dry exposed sites, Disturbed sites, Lower montane zones", "Forest edges", "Grassland, boreal forest, aspen parkland", "Hardwood forest", "Moist shady woods", "Rock slopes, Hillsides"],
+      "Nitrogen Fixing": ["No", "Yes"],
+      "Nitrogen Usage": ["Light"],
+      "Propagation method": ["Cuttings", "Division", "Seed - direct sow", "Seed - direct sow, Cuttings", "Seed - direct sow, Division", "Seed - direct sow, Seed - transplant", "Seed - direct sow, Seed - transplant, Division", "Seed - transplant", "Seed - transplant, Seed - direct sow", "Seed - transplant, Seed - direct sow, Division"],
+      "Propagation - Cuttings": ["best in late Spring; softwood cuttings root fastest"],
+      "Propagation - Direct sowing": ["Can be grown in containers", "Direct sow in autumn or shortly before latest date of frost", "Feb-April; Oct-Nov", "Feb. - April", "In containers or in rows in beds around last frost date", "from March to June; Aug to Sep", "true"],
+      "Propagation - Transplanting": ["Seed indoors 6 weeks before transplanting in the garden", "Start indoors from late february to mid-summer", "Start seeds indoors 5-6 weeks before last frost", "Start seeds indoors 6-8 weeks before last frost date", "sow in deep pots in cool, frost-free place", "sow indoors in containers from Feb., transplant early summer", "sow seeds in pots in a greenhouse", "start seeds indoors 8 weeks prior to last frost date"],
+      "When to sow (indoors)": ["16 weeks before last frost date", "2-3 weeks before last frost", "2-4 weeks before last frost", "3-4 weeks before last frost", "4-6 weeks after last frost", "4-6 weeks before last frost", "6-8 weeks before last frost", "8-12 weeks before last frost"],
+      "When to sow (outdoors)": "10+",
+      "When to plant (transplant)": ["1 week after last frost", "10-12 weeks, 1 week after last frost date", "2 weeks after last frost", "2 weeks before last frost", "6 weeks after sowing them in pots", "At last frost date", "When plants are 5 weeks old", "at last frost date"],
+      "When to plant (cuttings)": ["early spring or late fall"],
+      "When to plant (division)": ["8-12 weeks before last frost"],
+      "When to start indoors (weeks)": ["4", "5"],
+      "When to start outdoors (weeks)": ["-2", "-3", "4"],
+      "Germination temperature": "10+",
+      "Germination time": "10+",
+      "Cold stratification temperature": ["3° C (37° F)"],
+      "Cold stratification time": ["6 weeks", "70-100 days", "90-120 days"],
+      "Seed planting depth": ["0.5 cm", "1 cm", "1.5 cm", "2.5 cm"],
+      "Seed viability": ["2-3 years", "3 to 7 years", "3-5 years", "3-7 years"],
+      "1000 Seed Weight (g)": "10+",
+      "Days to maturity": ["100-150", "45-60", "45-65", "50-100", "50-65", "55", "60", "60-70", "60-75", "90"],
+      "Days to harvest": ["120-150", "45", "45-80", "45-85", "60", "65", "67", "70", "80"]
+    },
+    "info": {
+      "Alternate name": "10+",
+      "Family": "10+",
+      "Genus": ["Allium", "Borago", "Malus", "Photinia", "Phytolacca", "Rubus"],
+      "Native to": "10+",
+      "Introduced into": "10+",
+      "Wikipedia": "10+",
+      "Plants For A Future": "10+",
+      "Plants of the World Online": "10+",
+      "Plants of the World Online Name (Synonym)": "10+",
+      "Plants of the World Online Link (Synonym)": "10+",
+      "North Carolina Extension Gardener Plant Toolbox": ["https://plants.ces.ncsu.edu/plants/salvia-lyrata/"],
+      "PIEDMONT NATIVE PLANTS: A GUIDE FOR LANDSCAPES AND GARDENS, 2ND EDITION": ["https://static1.squarespace.com/static/58e25c41e6f2e17ea4cb7766/t/65ea5cfea8256431ceac32fb/1709858047365/Northern+Piedmont+Native+Plant+Guide-2nd+ed+2024.pdf"],
+      "Frontiers in Pharmacology": ["https://www.frontiersin.org/articles/10.3389/fphar.2021.708549/full"],
+      "Edible": ["True", "true"],
+      "Edible parts": "10+",
+      "Edible uses": "10+",
+      "Medicinal": ["Sting and itch relief from insect bites", "True", "boiled root is galactogogue, anthelmintic", "carminative, laxative, hypoglycaemic; against inflammation"],
+      "Medicinal parts": ["Fruit", "Roots"],
+      "Utility": "10+",
+      "Leaves": ["Deciduous", "Evergreen"]
+    },
+    "problems": {
+      "Pests": ["Flea beatles, Cutworms, Root maggots, Cabbage loopers, Cabbageworms, Cabbage aphids, Slugs, Snails, Nematodes", "Thrips, Spider mites"],
+      "Diseases": ["Black leg, Black rot, Turnip mosaic virus", "Fusarium bulb rot"],
+      "Warning": ["Invasive, Weed potential", "Might be mistaken for poisonous plants", "Toxic fruits", "Toxic, invasive, not for compost, not for insects or bees", "Weed potential"]
+    }
+  }
+}

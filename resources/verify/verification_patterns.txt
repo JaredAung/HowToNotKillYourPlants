@@ -1,0 +1,38 @@
+# Verification Patterns Report
+
+Summary of patterns discovered in feature_compatibility and cumulative_mismatch analyses.
+
+---
+
+## 1. Feature Priority Pattern
+
+**Finding:** Care and light mismatches have the most detrimental effect on plant survival.
+
+**Survival data (match − mismatch):**
+  care:   0.180 (highest)
+  light:  0.142 (second)
+  climate: 0.132
+  zone:   0.127
+  water:  0.127
+  soil:   0.094 (lowest)
+
+**Model alignment:** The model encodes this priority. Care and light rank 1 and 2 in both survival drop and model score drop. A mismatch in care (e.g., user care level below plant need) or light (user light vs plant ideal/tolerated) is correctly penalized most heavily.
+
+**Note:** Water and zone are under-weighted by the model relative to their survival impact.
+
+---
+
+## 2. Cumulative Mismatch Penalty
+
+**Finding:** Multiple small mismatches together are worse than the sum of their individual effects.
+
+**Oracle:** MISMATCH_DECAY = 0.87 → final_score = base_score × 0.87^num_mismatches
+  1 mismatch: 0.87× (13% drop)
+  4 mismatches: 0.87⁴ ≈ 0.57 (nearly halves the score)
+  6 mismatches: 0.87⁶ ≈ 0.44
+
+**Interpretation:** A plant slightly off on one dimension might be fine; slightly off on four dimensions gets hit with ~0.57 multiplier. The compound penalty means each additional imperfect feature multiplies the damage.
+
+**Model alignment:** The model should learn that mean score decreases as num_mismatches increases, with a compound (non-linear) effect rather than a simple additive drop.
+
+---

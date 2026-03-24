@@ -11,7 +11,7 @@ import voyageai
 ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT / ".env")
 
-USERS_PATH = ROOT / "resources" / "synthetic_users.json"
+USERS_PATH = ROOT / "resources" / "data" / "synthetic_users.json"
 EMBED_MODEL = "voyage-4-lite"
 BATCH_SIZE = 128
 

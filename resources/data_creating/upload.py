@@ -14,7 +14,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 # Paths (relative to resources/)
 ROOT = Path(__file__).resolve().parent.parent
-PLANT_PROFILES_PATH = ROOT / "plant_profiles.json"
+PLANT_PROFILES_PATH = ROOT / "data_creating" / "plant_profiles.json"
 PLANT_EMBEDDINGS_PATH = ROOT / "two_tower_training" / "output" / "plant_embeddings.json"
 
 MONGO_URI = os.getenv("MONGO_URI")

@@ -1,0 +1,74 @@
+{
+  "water_to_days": {
+    "dry": 7,
+    "moist": 2,
+    "wet": 1,
+    "water": 1
+  },
+  "light": [
+    "full shade",
+    "full sun",
+    "partial sun/shade"
+  ],
+  "water_freq": [1, 2, 7],
+  "soil": [
+    "heavy",
+    "light",
+    "medium"
+  ],
+  "size": [
+    "small",
+    "medium",
+    "large"
+  ],
+  "layer": [
+    "ground cover",
+    "herbs",
+    "roots",
+    "shrubs",
+    "tall trees",
+    "trees",
+    "understory",
+    "vines"
+  ],
+  "life_cycle": [
+    "annual",
+    "biennial",
+    "perennial"
+  ],
+  "growth": [
+    "fast",
+    "med",
+    "slow"
+  ],
+  "temperature": [
+    "cold",
+    "cool",
+    "hot",
+    "warm"
+  ],
+  "origin_climate": [
+    "alpine",
+    "arid",
+    "mediterranean",
+    "temperate",
+    "tropical"
+  ],
+  "care_level": [
+    "easy",
+    "medium",
+    "hard"
+  ],
+  "USDA_zone": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10"
+  ]
+}
