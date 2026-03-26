@@ -12,6 +12,47 @@ V1 : [HowToNotKillYourIndoorPlants](https://github.com/JaredAung/HowToNotKillYou
 
 Live Website : [https://how-to-not-kill-your-plants.vercel.app] 
 
+---
+# Branch Info
+
+### 🔹 `main` — Production / Stable Branch
+The deployed version of the application.
+
+Includes:
+- Two-tower recommendation pipeline (trained on synthetic interaction data)
+- Semantic reranking layer
+- LangGraph chatbot for plant exploration and Q&A
+- FastAPI-based backend with low-latency inference
+
+This branch represents the **end-to-end working system**.
+
+---
+
+### 🔹 `v2` — Experimental ML Improvements
+Focused on improving recommendation quality.
+
+Includes:
+- Training on **behaviorally realistic synthetic interaction data**
+- Improved feature design and user–plant interaction modeling
+- Ongoing experimentation with ranking performance and evaluation metrics
+
+This branch is used for **model iteration and evaluation improvements**.
+
+---
+
+### 🔹 `rag_development` — RAG & Knowledge Grounding
+Focused on enhancing chatbot intelligence through document retrieval.
+
+Includes:
+- Ingestion of external plant knowledge sources (e.g., Wikipedia)
+- Document chunking and embedding for retrieval
+- Retrieval-augmented generation (RAG) for grounded Q&A
+- Integration with LangGraph for context-aware responses
+
+This branch extends the system toward a **fully grounded, explainable AI assistant**.
+
+---
+
 # 🚀 Key Innovations
 
 ### 🧠 ML Recommendation Engine
