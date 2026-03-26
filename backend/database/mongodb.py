@@ -1,6 +1,7 @@
 """
 Shared MongoDB connection and collection access.
-Uses env vars: MONGO_URI, MONGO_DATABASE, MONGO_USER_PROFILES_COLLECTION, PLANT_MONGO_COLLECTION
+Uses env vars: MONGO_URI, MONGO_DATABASE, MONGO_USER_PROFILES_COLLECTION,
+NEW_PLANT_COLLECTION (preferred), or PLANT_MONGO_COLLECTION (legacy fallback).
 """
 import os
 
@@ -11,7 +12,9 @@ from pymongo.database import Database
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "HowNotToKillYourPlants")
 USER_COLLECTION = os.getenv("MONGO_USER_PROFILES_COLLECTION", "UserCollection")
-PLANT_COLLECTION = os.getenv("PLANT_MONGO_COLLECTION", "PlantCollection")
+PLANT_COLLECTION = os.getenv("NEW_PLANT_COLLECTION") or os.getenv(
+    "PLANT_MONGO_COLLECTION", "NewPlantCollection"
+)
 GARDEN_COLLECTION = os.getenv("MONGO_USER_GARDEN_COLLECTION", "User_Garden_Collection")
 DEATH_COLLECTION = os.getenv("PLANT_DEATH_COLLECTION", "PlantDeathCollection")
 TOKEN_BLACKLIST_COLLECTION = os.getenv("MONGO_TOKEN_BLACKLIST_COLLECTION", "TokenBlacklist")
@@ -33,7 +36,7 @@ def get_user_collection() -> Collection:
 
 
 def get_plant_collection() -> Collection:
-    """Get PlantCollection (plants with plant_tower_embedding)."""
+    """Get the plant catalog collection (tower embeddings, profile_embedding, etc.)."""
     return get_db()[PLANT_COLLECTION]
 
 

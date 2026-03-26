@@ -14,7 +14,7 @@ Run these steps in order. Each step produces outputs used by the next.
 | | `python -m resources.data_creating.data_creating_pipeline map-permapeople` | `data_creating/permapeople_plants_mapped*.json` |
 | **2. Embed & upload plants** | `python -m resources.ETL.embed_and_upload` | MongoDB `NewPlantCollection` |
 | **3. Synthetic users** | `python -m resources.synthetic_user.generate_users` | `data/synthetic_users.json` |
-| **4. Synthetic interactions** | `python -m resources.synthetic_user.generate_interactions` | `data/synthetic_interactions.json` |
+| **4. Synthetic interactions** | `python -m resources.synthetic_user.generate_interactions` | `two_tower_training/synthetic_interactions.json` |
 | **5. Feast features** | `python -m resources.ETL.flow` | Feast feature store |
 | **6. Train model** | `python -m resources.two_tower_training.training_script` | `two_tower_training/output/two_tower.pt` |
 
@@ -26,7 +26,7 @@ Run these steps in order. Each step produces outputs used by the next.
 resources/
 ├── data/                     # Shared generated outputs (see data/README.md)
 │   ├── synthetic_users.json
-│   └── synthetic_interactions.json
+│   └── (interactions live under two_tower_training/)
 │
 ├── data_creating/            # Plant data pipeline (Permapeople API → JSON)
 │   ├── data_creating_pipeline.py   # gather + map + upload to MongoDB
@@ -81,7 +81,7 @@ ETL/embed_and_upload  ──► MongoDB (NewPlantCollection)
 synthetic_user/generate_users  ──► data/synthetic_users.json
       │                                      │
       ▼                                      │
-synthetic_user/generate_interactions  ──► data/synthetic_interactions.json
+synthetic_user/generate_interactions  ──► two_tower_training/synthetic_interactions.json
       │                                      │
       │                                      │
       ▼                                      ▼

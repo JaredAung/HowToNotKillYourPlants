@@ -233,9 +233,9 @@ flowchart TD
     end
 
     subgraph Eval["3. Eval (optional)"]
-        MongoUpdate --> BaselineEval[Baseline vs Rec Pipeline Eval]
-        BaselineEval --> BaselineVs[baselineVs.txt]
-        BaselineVs --> DVCAdd2[dvc add baselineVs.txt]
+        MongoUpdate --> TwoTowerEval[Two-tower offline eval]
+        TwoTowerEval --> EvalJson[two_tower_eval.json]
+        EvalJson --> DVCAdd2[dvc add two_tower_eval.json]
     end
 
     subgraph Version["4. Versioning"]
@@ -244,7 +244,7 @@ flowchart TD
     end
 ```
 
-**Flow (Prefect):** `retrain` → `eval` (baseline vs rec) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
+**Flow (Prefect):** `retrain` → `eval` (`python -m resources.two_tower_training.eval` → `two_tower_eval.json`) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
 
 **Death penalty vs retraining:** The death penalty is a **short-term** fix until the next retrain. Once retraining runs with the latest garden and death data, the model learns failures directly; the penalty continues to provide an extra safety margin.
 
@@ -602,7 +602,8 @@ JWT_SECRET=your-secret
 MONGO_USER_PROFILES_COLLECTION=UserCollection
 MONGO_USER_GARDEN_COLLECTION=User_Garden_Collection
 PLANT_DEATH_COLLECTION=PlantDeathCollection
-PLANT_MONGO_COLLECTION=PlantCollection
+NEW_PLANT_COLLECTION=NewPlantCollection
+# Legacy: PLANT_MONGO_COLLECTION used only if NEW_PLANT_COLLECTION is unset
 
 # ML & APIs
 VOYAGE_API_KEY=...
@@ -626,9 +627,9 @@ USE_GEMINI=true
 
 ## MongoDB Vector Index
 
-Create a vector search index on `PlantCollection`:
+Create a vector search index on your plant catalog (default `NewPlantCollection`; set `NEW_PLANT_COLLECTION` to match):
 
-1. Atlas → Database → PlantCollection → Search Indexes
+1. Atlas → Database → (your plant collection) → Search Indexes
 2. Create index (JSON editor) from `resources/vector_index_definition.json`
 3. Index name must match `VECTOR_SEARCH_INDEX` (default: `vector_index`)
 
@@ -709,8 +710,9 @@ dvc pull
 |------|------|
 | Model | `resources/two_tower_training/output/two_tower.pt` |
 | Metrics | `resources/two_tower_training/output/retrain_metrics.txt` |
-| Baseline vs rec | `resources/two_tower_training/output/baselineVs.txt` |
-| DVC pointers | `*.dvc` in `resources/two_tower_training/output/` |
+| Offline eval (two-tower + optional semantic baseline) | `resources/two_tower_training/output/two_tower_eval.json` |
+| Synthetic interactions | `resources/two_tower_training/synthetic_interactions.json` (see `synthetic_interactions.json.dvc`) |
+| DVC pointers | `*.dvc` under `resources/two_tower_training/` and `output/` |
 | Plant embeddings | `resources/two_tower_training/output/plant_embeddings.json` |
 | Drive folder | [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH) |
 
@@ -720,7 +722,7 @@ dvc pull
 pip install prefect
 python -m backend.recommend.retrain.prefect_flow
 python -m backend.recommend.retrain.prefect_flow --dvc-push   # retrain + push to Drive
-python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip baseline vs rec eval
+python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip offline eval JSON export
 ```
 
 ---

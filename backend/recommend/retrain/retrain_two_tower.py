@@ -53,7 +53,7 @@ from torch.utils.data import DataLoader
 # Paths
 USERS_PATH = ROOT / "resources" / "data" / "synthetic_users.json"
 PLANTS_PATH = ROOT / "resources" / "data_creating" / "plant_profiles.json"
-INTERACTIONS_PATH = ROOT / "resources" / "data" / "synthetic_interactions.json"
+INTERACTIONS_PATH = ROOT / "resources" / "two_tower_training" / "synthetic_interactions.json"
 # Fallback: data_creating if interactions generated there
 INTERACTIONS_PATH_ALT = ROOT / "resources" / "data_creating" / "interactions.json"
 OUTPUT_DIR = ROOT / "resources" / "two_tower_training" / "output"

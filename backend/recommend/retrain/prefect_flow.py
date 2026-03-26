@@ -20,7 +20,7 @@ from prefect import flow, task
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 OUTPUT_DIR = ROOT / "resources" / "two_tower_training" / "output"
-BASELINE_VS_PATH = OUTPUT_DIR / "baselineVs.txt"
+TWO_TOWER_EVAL_JSON = OUTPUT_DIR / "two_tower_eval.json"
 
 
 @task
@@ -40,9 +40,15 @@ def run_retrain(include_real: bool = True, update_mongo: bool = True, dvc_add: b
 
 @task
 def run_eval(output_path: Path) -> bool:
-    """Run baseline vs rec pipeline eval and write results to file."""
+    """Run two-tower offline eval (and optional semantic baseline) and write metrics JSON."""
     result = subprocess.run(
-        ["python", "-m", "backend.eval.eval", "--output", str(output_path)],
+        [
+            sys.executable,
+            "-m",
+            "resources.two_tower_training.eval",
+            "--output-json",
+            str(output_path),
+        ],
         cwd=str(ROOT),
     )
     return result.returncode == 0
@@ -94,16 +100,16 @@ def retrain_flow(
     use_eval: bool = True,
 ) -> dict:
     """
-    Retrain the two-tower model, run baseline vs rec eval, and optionally push to DVC remote.
+    Retrain the two-tower model, run offline eval JSON export, and optionally push to DVC remote.
 
-    Flow: retrain -> [eval (baselineVs.txt)] -> dvc add [baselineVs] -> dvc push (if enabled)
+    Flow: retrain -> [eval (two_tower_eval.json)] -> dvc add [eval JSON] -> dvc push (if enabled)
 
     Args:
         include_real: Use real garden/death data from MongoDB.
         update_mongo: Update PlantCollection with new embeddings.
-        dvc_add: Add model, metrics, and baselineVs.txt to DVC.
+        dvc_add: Add model, metrics, and two_tower_eval.json to DVC.
         dvc_push: Push to DVC remote after retrain (requires dvc_add=True).
-        use_eval: Run baseline vs rec pipeline eval and add baselineVs.txt to DVC.
+        use_eval: Run ``python -m resources.two_tower_training.eval --output-json ...`` and DVC-add it.
     """
     success = run_retrain(
         include_real=include_real,
@@ -114,13 +120,13 @@ def retrain_flow(
         return {"status": "failed", "step": "retrain"}
 
     if use_eval:
-        eval_ok = run_eval(BASELINE_VS_PATH)
+        eval_ok = run_eval(TWO_TOWER_EVAL_JSON)
         if not eval_ok:
             return {"status": "failed", "step": "eval"}
 
     if dvc_add:
         if use_eval:
-            add_ok = run_dvc_add(BASELINE_VS_PATH)
+            add_ok = run_dvc_add(TWO_TOWER_EVAL_JSON)
             if not add_ok:
                 return {"status": "failed", "step": "dvc_add"}
         if dvc_push:
@@ -134,7 +140,7 @@ def retrain_flow(
         "metrics_path": str(OUTPUT_DIR / "retrain_metrics.txt"),
     }
     if use_eval:
-        result["baseline_vs_path"] = str(BASELINE_VS_PATH)
+        result["two_tower_eval_json"] = str(TWO_TOWER_EVAL_JSON)
     return result
 
 
@@ -144,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("--update-mongo", action="store_true", help="Update MongoDB PlantCollection")
     parser.add_argument("--no-dvc-add", action="store_true", help="Skip DVC add")
     parser.add_argument("--dvc-push", action="store_true", help="Push to DVC remote after retrain")
-    parser.add_argument("--no-use-eval", action="store_true", help="Skip baseline vs rec eval")
+    parser.add_argument("--no-use-eval", action="store_true", help="Skip two-tower offline eval JSON export")
     args = parser.parse_args()
     retrain_flow(
         include_real=not args.no_include_real,

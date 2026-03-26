@@ -71,3 +71,25 @@ user_features_fv = FeatureView(
     online=True,
     source=user_features_source,
 )
+
+# Learned plant tower vectors (64-d) from TwoTowerModel.encode_plant — written after training.
+PLANT_TOWER_DIM = 64
+PLANT_TOWER_SCHEMA = [
+    Field(name=f"tower_{i}", dtype=Float32) for i in range(PLANT_TOWER_DIM)
+]
+
+plant_tower_source = FileSource(
+    name="plant_tower_source",
+    path=str(DATA_DIR / "plant_tower_features.parquet"),
+    timestamp_field="event_timestamp",
+    created_timestamp_column="created",
+)
+
+plant_tower_features_fv = FeatureView(
+    name="plant_tower_features",
+    entities=[plant],
+    ttl=timedelta(days=365),
+    schema=PLANT_TOWER_SCHEMA,
+    online=True,
+    source=plant_tower_source,
+)

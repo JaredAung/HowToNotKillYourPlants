@@ -16,7 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RESOURCES = SCRIPT_DIR.parent
 USERS_PATH = RESOURCES / "data" / "synthetic_users.json"
 PLANTS_PATH = RESOURCES / "data_creating" / "permapeople_plants_mapped_normalized.json"
-OUTPUT_PATH = RESOURCES / "data" / "synthetic_interactions.json"
+OUTPUT_PATH = RESOURCES / "two_tower_training" / "synthetic_interactions.json"
 PERSONA_INTERACTIONS_PATH = SCRIPT_DIR / "persona_interactions.json"
 
 PLANTS_PER_USER_DEFAULT = 12

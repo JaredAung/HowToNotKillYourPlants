@@ -1,6 +1,8 @@
 """
 Prefect workflow: retrieve plants from MongoDB, load users from synthetic_users.json.
-Applies feature engineering to both.
+Applies feature engineering to both. If Mongo documents include ``plant_tower_embedding``
+(64-d), writes ``plant_tower_features.parquet`` and materializes with Feast in the same
+run as plant/user features.
 
 Run from project root:
   python -m resources.ETL.flow
@@ -42,10 +44,14 @@ def apply_user_feature_engineering_task(users: list[dict]) -> list[dict]:
 
 
 @task
-def push_features_to_feast_task(plants: list[dict], users: list[dict]) -> None:
-    """Write plant and user features to parquet and materialize into Feast."""
+def push_features_to_feast_task(
+    plants: list[dict],
+    users: list[dict],
+    plant_tower_by_id: dict[int, list[float]] | None = None,
+) -> None:
+    """Write plant and user features to parquet; optionally plant_tower_features (64-d from Mongo)."""
     from resources.ETL.feast_store import push_features_to_feast
-    push_features_to_feast(plants, users)
+    push_features_to_feast(plants, users, plant_tower_by_id=plant_tower_by_id)
 
 
 @task
@@ -158,10 +164,27 @@ def retrieve_plants_flow(
                     val = emb[i]
                     print(f"  {name}: {val:.4f}" if isinstance(val, float) else f"  {name}: {val}")
 
-    push_features_to_feast_task(plants, users)
+    from resources.ETL.feast_store import plant_tower_embeddings_from_mongo_plants
+
+    plant_tower_by_id = plant_tower_embeddings_from_mongo_plants(plants)
+    if plant_tower_by_id:
+        print(
+            f"Loaded plant_tower_embedding from Mongo for {len(plant_tower_by_id)} plants "
+            "(Feast plant_tower_features)"
+        )
+    else:
+        print("No plant_tower_embedding on Mongo plants; Feast plant_tower_features parquet unchanged")
+
+    push_features_to_feast_task(plants, users, plant_tower_by_id=plant_tower_by_id or None)
     print("Pushed plant and user features to Feast")
 
-    return {"count": count, "plants": plants, "users": users, "user_count": user_count}
+    return {
+        "count": count,
+        "plants": plants,
+        "users": users,
+        "user_count": user_count,
+        "plant_tower_count": len(plant_tower_by_id),
+    }
 
 
 if __name__ == "__main__":
@@ -174,4 +197,7 @@ if __name__ == "__main__":
         collection_name=args.collection,
         limit=args.limit,
     )
-    print(f"Result: {result['count']} plants, {result['user_count']} users")
+    print(
+        f"Result: {result['count']} plants, {result['user_count']} users, "
+        f"plant_tower={result['plant_tower_count']}"
+    )

@@ -24,6 +24,8 @@ FEATURE_NAMES = [
 DEFAULT_FEAST_REPO = Path(__file__).resolve().parent.parent.parent / "feature_repo"
 HIDDEN_DIM = 128
 OUTPUT_DIM = 64
+# Must match feature_repo/feature_definitions.py plant_tower_features (tower_0..tower_63).
+PLANT_TOWER_FEATURE_NAMES = [f"tower_{i}" for i in range(OUTPUT_DIM)]
 DROPOUT = 0.2
 TAU = 0.1  # temperature for normalized dot product
 
@@ -231,6 +233,59 @@ def _fetch_batch_features_from_feast(
             row.append(float(val) if val is not None else 0.0)
         rows.append(row)
     return torch.tensor(rows, dtype=torch.float32)
+
+
+def fetch_plant_tower_embeddings_from_feast(
+    plant_ids: list[int],
+    fs=None,
+    repo_path: str | Path | None = None,
+) -> dict[int, list[float]]:
+    """
+    Fetch 64-d plant tower vectors from Feast ``plant_tower_features`` (tower_0..tower_63).
+    Plants with missing or partial features are omitted from the returned dict.
+    """
+    if not plant_ids:
+        return {}
+    try:
+        from feast import FeatureStore
+    except ImportError:
+        raise ImportError("feast not installed. Run: pip install feast")
+
+    if fs is None:
+        path = repo_path or DEFAULT_FEAST_REPO
+        fs = FeatureStore(repo_path=str(path))
+
+    fv_name = "plant_tower_features"
+    join_key = "plant_id"
+    features = [f"{fv_name}:{name}" for name in PLANT_TOWER_FEATURE_NAMES]
+    entity_rows = [{join_key: eid} for eid in plant_ids]
+
+    result = fs.get_online_features(
+        features=features,
+        entity_rows=entity_rows,
+    ).to_dict()
+
+    out: dict[int, list[float]] = {}
+    for i, pid in enumerate(plant_ids):
+        row: list[float] = []
+        missing = False
+        for name in PLANT_TOWER_FEATURE_NAMES:
+            full_key = f"{fv_name}:{name}"
+            key = full_key if full_key in result else name
+            if key not in result:
+                key = next((k for k in result if k.endswith(name)), None)
+            val = result[key][i] if key else None
+            if val is None:
+                missing = True
+                break
+            v = float(val)
+            if v != v:  # NaN
+                missing = True
+                break
+            row.append(v)
+        if not missing and len(row) == OUTPUT_DIM:
+            out[pid] = row
+    return out
 
 
 def _fetch_features_from_feast(
