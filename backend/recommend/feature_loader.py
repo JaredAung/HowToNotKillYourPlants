@@ -4,6 +4,7 @@ Same vocabs and encoding as resources/two_tower_training/two_tower_training.py.
 Converts MongoDB user profile -> user embedding for scoring against plant_tower_embedding.
 """
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -218,17 +219,64 @@ class UserTower(nn.Module):
 _user_tower: UserTower | None = None
 
 
+def _unwrap_checkpoint_dict(raw: Any) -> dict[str, Any]:
+    """Handle checkpoints saved as ``{state_dict: ...}`` or similar wrappers."""
+    if not isinstance(raw, dict):
+        raise TypeError(f"Expected dict checkpoint, got {type(raw).__name__}")
+    for key in ("state_dict", "model_state_dict", "model_state", "model"):
+        inner = raw.get(key)
+        if not isinstance(inner, dict) or not inner:
+            continue
+        if any(
+            isinstance(k, str) and ("user_tower" in k or "plant_tower" in k or "embed_light" in k)
+            for k in inner
+        ):
+            return inner
+    return raw
+
+
+def _extract_user_tower_state(flat: dict[str, Any]) -> dict[str, Any]:
+    """Strip common prefixes from full two-tower checkpoints (``user_tower.``, ``module.user_tower.``, …)."""
+    prefixes = ("user_tower.", "module.user_tower.", "model.user_tower.")
+    for prefix in prefixes:
+        out = {
+            k[len(prefix) :]: v
+            for k, v in flat.items()
+            if isinstance(k, str) and k.startswith(prefix)
+        }
+        if out:
+            return out
+    return {}
+
+
 def get_user_tower() -> UserTower:
     """Lazy-load UserTower from checkpoint."""
     global _user_tower
     if _user_tower is None:
-        _user_tower = UserTower()
+        tower = UserTower()
         if MODEL_PATH.exists():
             state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-            # Extract user_tower weights (keys like "user_tower.embed_light.weight")
-            user_state = {k.replace("user_tower.", ""): v for k, v in state.items() if k.startswith("user_tower.")}
-            _user_tower.load_state_dict(user_state, strict=True)
-        _user_tower.eval()
+            flat = _unwrap_checkpoint_dict(state)
+            user_state = _extract_user_tower_state(flat)
+            if not user_state:
+                sample_keys = [k for k in flat.keys() if isinstance(k, str)][:12]
+                raise RuntimeError(
+                    f"No user_tower weights in {MODEL_PATH}. "
+                    f"Expected keys like 'user_tower.embed_light.weight'. "
+                    f"First keys in file: {sample_keys!r}. "
+                    f"Re-run training and save two_tower.pt, or run: "
+                    f"python -m backend.recommend.retrain.retrain_two_tower"
+                )
+            try:
+                tower.load_state_dict(user_state, strict=True)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load user_tower from {MODEL_PATH}: {e}. "
+                    "Checkpoint may be incomplete or from a different model architecture; "
+                    "retrain and save a full two_tower.pt."
+                ) from e
+        tower.eval()
+        _user_tower = tower
     return _user_tower
 
 

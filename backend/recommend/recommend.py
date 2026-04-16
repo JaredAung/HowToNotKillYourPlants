@@ -1,38 +1,68 @@
 """
-Plant recommendation API. Two-tower inference + Cohere reranker.
+Plant recommendation API — scores catalog plants for a user and exposes REST endpoints.
+
+**Scope & features**
+
+- 
+**Entry points**
+
+- ``recommend_for_profile()`` — core pipeline (used by this router, chat, search, eval).
+- ``GET /recommend/``, ``GET /recommend/cache``, ``GET /recommend/explanation`` — authenticated
+  HTTP surface (JWT).
+
+**Layout in this file** — vector helpers → ``recommend_for_profile`` → Cohere helpers → Gemini
+formatting → FastAPI routes.
 """
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Ensure .env is loaded (project root)
+# Load environment variables from the repository root (.env).
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from fastapi import APIRouter, Depends, HTTPException
 
 import logging
 
-from auth.jwt import get_current_username
-from database import get_plant_collection, get_user_collection
-from garden.death import get_dead_plant_ids
-from llm import gemini_generate
-from recommend.cache import get_cached, inspect_cache, set_cached
-from recommend.feature_loader import compute_user_embedding, score_plants
+from auth.jwt import get_current_username # get the logged in user's username
+from database import get_plant_collection, get_user_collection # get the MongoDB collections
+from llm import gemini_generate # generate a natural-language explanation for the plants
+from recommend.cache import get_cached, inspect_cache, set_cached # cache the recommendation results
+from recommend.feature_loader import compute_user_embedding, score_plants # compute the user's embedding and score the plants using the two-tower model
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
-DEFAULT_TOP_K = 20
-VECTOR_INDEX = os.getenv("VECTOR_SEARCH_INDEX", "vector_index")
-DEATH_PENALTY_LAMBDA = float(os.getenv("DEATH_PENALTY_LAMBDA", "0.5"))
-USE_DEATH_PENALTY = os.getenv("USE_DEATH_PENALTY", "true").lower() in ("true", "1", "yes")
+#CONSTRAINTS AND CONFIGURATIONS
+DEFAULT_TOP_K = 20 # the default number of plants to return from the two-tower model
+RERANK_MODEL = "rerank-v3.5" # the Cohere rerank model to use
+
+VECTOR_INDEX = os.getenv("VECTOR_SEARCH_INDEX", "vector_index") # MongoDB vector search index
+
+# =============================================================================
+# Vector retrieval (MongoDB Atlas $vectorSearch)
+# =============================================================================
 
 
 def _vector_search_plants(plant_coll, user_emb: list[float], k: int) -> list[dict]:
-    """
-    Use MongoDB $vectorSearch (dot product) to get top-k plants.
-    Requires a vector index on plant_tower_embedding with similarity: dotProduct.
-    Returns list of plant docs with score from $meta vectorSearchScore.
+    """Find the ``k`` most similar plants to the user using Atlas vector search.
+
+    The plant embeddings are generated using the two-tower model, L2-normalized and stored in MongoDB.
+    The user's embedding vector is compared against each plant's ``plant_tower_embedding``
+    using dot-product similarity. Requires a vector search index (see ``VECTOR_SEARCH_INDEX``).
+
+    Args:
+        plant_coll: MongoDB plants collection.
+        user_emb: User embedding vector (same length as plant embeddings; L2-normalized, 1024-dimensional).
+        k: Maximum number of plants to return.
+
+    Returns:
+        A list of MongoDB documents. Each document includes ``plant_id``, nested ``Info`` /
+        ``Care``, ``img_url``, and a ``score`` field from the vector search stage.
+
+    Note:
+        If this query fails (missing index, Atlas error), the caller falls back to scoring
+        every embedded plant in Python instead—slower, but keeps the API usable.
     """
     pipeline = [
         {
@@ -40,7 +70,7 @@ def _vector_search_plants(plant_coll, user_emb: list[float], k: int) -> list[dic
                 "index": VECTOR_INDEX,
                 "path": "plant_tower_embedding",
                 "queryVector": user_emb,
-                "numCandidates": min(200, max(k * 20, 150)),  # cap for small catalogs (~159 plants)
+                "numCandidates": min(200, max(k * 20, 150)),
                 "limit": k,
             }
         },
@@ -57,28 +87,52 @@ def _vector_search_plants(plant_coll, user_emb: list[float], k: int) -> list[dic
     return list(plant_coll.aggregate(pipeline))
 
 
+# =============================================================================
+# Main recommendation pipeline
+# =============================================================================
+
+
 def recommend_for_profile(
     profile: dict,
     username: str,
     k: int = DEFAULT_TOP_K,
     use_rerank: bool | None = None,
-    use_death_penalty: bool | None = None,
 ) -> dict:
-    """
-    Run recommendation pipeline for a given profile.
-    Uses ONLY the profile dict passed in—does NOT fetch from MongoDB.
-    Use for search extraction: pass the merged+normalized profile (existing + extracted).
-    Returns {"username": str, "plants": list}. No LLM explanation.
+    """Score and rank plants for a single user profile (the heart of the recommender).
+
+    Execution order: 
+    (1) Embed the profile with the two-tower user model     
+    (2) Retrieve similar plants from MongoDB
+    (3) Rerank with Cohere using a text query
+
+    Args:
+        profile: User data used for embedding and rerank text (e.g. environment, preferences).
+        username: Included in the response payload for traceability.
+        k: How many plants to keep in the final list.
+        use_rerank: ``None`` → read default from ``USE_RERANK`` env. ``True`` → call Cohere.
+
+    Returns:
+        Dictionary with keys ``username`` and ``plants``. Each plant entry is a flat dict with
+        identifiers, care summary fields, and numeric scores. If embedding fails or no plants
+        qualify, ``plants`` is empty.
     """
     plant_coll = get_plant_collection()
-    user_emb = compute_user_embedding(profile)  # Uses profile param only, not MongoDB
+
+    # Step A: vector for this profile (loads UserTower weights from feature_loader / two_tower.pt).
+    try:
+        user_emb = compute_user_embedding(profile)
+    except Exception as e:
+        logging.warning("compute_user_embedding failed, returning no plants: %s", e)
+        return {"username": username, "plants": []}
 
     try:
+        # Two-tower model retrieval
         plants = _vector_search_plants(plant_coll, user_emb, k)
     except Exception as e:
+        # Fallback: dot-product in app code when Atlas vector search is unavailable.
         logging.warning("MongoDB $vectorSearch failed (%s), falling back to Python scoring", e)
         all_plants = list(plant_coll.find(
-            {"plant_tower_embedding": {"$exists": True}},
+            {"plant_tower_embedding": {"$exists": True}}, 
             {"plant_id": 1, "plant_tower_embedding": 1, "Info": 1, "Care": 1, "img_url": 1}
         ))
         if not all_plants:
@@ -95,6 +149,7 @@ def recommend_for_profile(
     if not plants:
         return {"username": username, "plants": []}
 
+    # Step B: flatten nested Mongo ``Info`` / ``Care`` into stable keys for API and rerankers.
     results = []
     for p in plants:
         info = p.get("Info", {}) or {}
@@ -125,23 +180,35 @@ def recommend_for_profile(
             "symbolism": desc.get("symbolism"),
         })
 
+    # Step C: rerank with Cohere 
     if use_rerank is None:
         use_rerank = os.getenv("USE_RERANK", "true").lower() in ("true", "1", "yes")
     if use_rerank and results:
-        query = _user_profile_to_query(profile)  # Uses profile param only, not MongoDB
+        query = _user_profile_to_query(profile)
         results = _rerank_with_cohere(query, results, k)
 
-    apply_death = use_death_penalty if use_death_penalty is not None else USE_DEATH_PENALTY
-    if apply_death and results:
-        results = _apply_death_penalty(plant_coll, results, username, k)
-
     return {"username": username, "plants": results}
-RERANK_MODEL = "rerank-v3.5"
+
+
+# =============================================================================
+# Cohere rerank — turn profile + plants into text the rerank API understands
+# =============================================================================
 
 
 def _user_profile_to_query(user: dict) -> str:
-    """Build a text query from user profile for Cohere reranking.
-    Uses schema fields: environment, climate, safety, constraints, preferences.
+    """Build one ranking instruction string from a user document for Cohere's rerank API.
+
+    Splits preferences into "hard" (must match) and "soft" (nice to match) so the model can
+    prioritize realistically. 
+    
+    Used only when reranking is enabled.
+
+    Args:
+        user: Typically a Mongo-style nested user document with ``environment``, ``preferences``,
+            ``constraints``, optional ``climate``, and optional search fields like ``physical_desc``.
+
+    Returns:
+        A multi-sentence prompt assigned to the reranker's ``query`` argument.
     """
     env = user.get("environment", {}) or {}
     pref = user.get("preferences", {}) or {}
@@ -152,7 +219,7 @@ def _user_profile_to_query(user: dict) -> str:
     hard = []
     soft = []
 
-    # Environment
+    # Hard / soft buckets mirror how we describe constraints to the rerank model.
     if env.get("light_level"):
         hard.append(f"must tolerate light={env['light_level']}")
     if env.get("humidity_level"):
@@ -162,11 +229,9 @@ def _user_profile_to_query(user: dict) -> str:
     if min_f is not None and max_f is not None:
         hard.append(f"plant temp range must overlap with {min_f}–{max_f}°F")
 
-    # Constraints
     if constraints.get("preferred_size"):
         soft.append(f"prefer size={constraints['preferred_size']}")
 
-    # Preferences
     if care_pref.get("watering_freq"):
         hard.append(f"watering should match {care_pref['watering_freq']}")
     if care_pref.get("care_freq"):
@@ -174,11 +239,10 @@ def _user_profile_to_query(user: dict) -> str:
     if pref.get("care_level"):
         soft.append(f"prefer care level={pref['care_level']}")
 
-    # Climate
     if user.get("climate"):
         soft.append(f"prefer climate={user['climate']}")
 
-    # Physical description and symbolism (from search extraction)
+    # Optional fields from semantic search or onboarding flows.
     if user.get("physical_desc"):
         soft.append(f"user wants: {user['physical_desc']}")
     if user.get("symbolism"):
@@ -196,7 +260,16 @@ def _user_profile_to_query(user: dict) -> str:
 
 
 def _plant_to_document(p: dict) -> str:
-    """Build a text document from plant dict for Cohere reranking."""
+    """Serialize one plant record into a single line of plain text for Cohere reranking.
+
+    The rerank API compares each line against the user query; keep fields readable and concise.
+
+    Args:
+        p: Flattened plant dict (names, light, water, temp range, description fields).
+
+    Returns:
+        One string of plant profile for the reranker to compare against the user query.
+    """
     parts = []
     if p.get("common_name"):
         parts.append(p["common_name"])
@@ -232,57 +305,23 @@ def _plant_to_document(p: dict) -> str:
     return " | ".join(str(x) for x in parts)
 
 
-def _apply_death_penalty(
-    plant_coll,
-    results: list[dict],
-    username: str,
-    k: int,
-) -> list[dict]:
-    """
-    Apply death penalty: final_score = base_score - λ * similarity_penalty.
-    similarity_penalty = max dot product between candidate and any dead plant embedding.
-    """
-    dead_ids = get_dead_plant_ids(username)
-    if not dead_ids:
-        return results
-
-    candidate_ids = [r["plant_id"] for r in results]
-    all_ids = list(set(candidate_ids) | set(dead_ids))
-    plant_docs = list(
-        plant_coll.find(
-            {"plant_id": {"$in": all_ids}, "plant_tower_embedding": {"$exists": True}},
-            {"plant_id": 1, "plant_tower_embedding": 1},
-        )
-    )
-    emb_by_id = {p["plant_id"]: p["plant_tower_embedding"] for p in plant_docs}
-    dead_embs = [(i, emb_by_id[i]) for i in dead_ids if i in emb_by_id]
-    if not dead_embs:
-        return results
-
-    def dot(a: list[float], b: list[float]) -> float:
-        return sum(x * y for x, y in zip(a, b))
-
-    for r in results:
-        base_score = r.get("rerank_score") if r.get("rerank_score") is not None else r.get("score", 0)
-        cand_emb = emb_by_id.get(r["plant_id"])
-        if cand_emb is None:
-            r["final_score"] = base_score
-            r["score"] = base_score
-            continue
-        similarity_penalty = 0.0
-        for _, dead_emb in dead_embs:
-            sim = max(0.0, dot(cand_emb, dead_emb))
-            similarity_penalty = max(similarity_penalty, sim)
-        final_score = base_score - DEATH_PENALTY_LAMBDA * similarity_penalty
-        r["final_score"] = round(final_score, 4)
-        r["score"] = r["final_score"]
-
-    results.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-    return results[:k]
-
-
 def _rerank_with_cohere(query: str, results: list[dict], top_n: int) -> list[dict]:
-    """Rerank results using Cohere. Returns reordered list with rerank_score. Raises if rerank fails."""
+    """Reorder candidate plants using Cohere's hosted rerank model (semantic relevance to the query).
+
+    Args:
+        query: Instructions built by :func:`_user_profile_to_query`.
+        results: Plants from vector search, already in flattened dict form.
+        top_n: Upper bound on how many items to return.
+
+    Returns:
+        A new list sorted by the reranker. Each dict includes a ``rerank_score`` field.
+
+    Raises:
+        HTTPException: Status 503 when ``COHERE_API_KEY`` is not set (service not configured).
+
+    Note:
+        Requires network access to Cohere's API at request time.
+    """
     if not results:
         return results
     api_key = os.getenv("COHERE_API_KEY")
@@ -294,7 +333,10 @@ def _rerank_with_cohere(query: str, results: list[dict], top_n: int) -> list[dic
     import cohere
 
     co = cohere.ClientV2(api_key=api_key)
-    documents = [_plant_to_document(p) for p in results]
+
+    # list of flattened plant profiles for the reranker to compare against the user query
+    documents = [_plant_to_document(p) for p in results] 
+
     rerank_resp = co.rerank(
         model=RERANK_MODEL,
         query=query,
@@ -309,8 +351,20 @@ def _rerank_with_cohere(query: str, results: list[dict], top_n: int) -> list[dic
     return out
 
 
+# =============================================================================
+# Gemini — natural-language "why these plants?" (not used in numeric ranking)
+# =============================================================================
+
+
 def _format_plant_for_llm(p: dict) -> str:
-    """Format a plant dict for LLM context."""
+    """Format one plant as short bullet text with relevant fields for the explanation LLM prompt.
+
+    Args:
+        p: Summary dict with display name and care fields.
+
+    Returns:
+        A few lines of human-readable text suitable to paste into a Gemini user message.
+    """
     name = p.get("common_name") or p.get("latin") or f"Plant #{p.get('plant_id')}"
     parts = [f"- {name}"]
     if p.get("latin") and p.get("common_name"):
@@ -329,12 +383,25 @@ def _format_plant_for_llm(p: dict) -> str:
 
 
 def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
-    """Use Google GenAI (Gemini) via LangChain to explain why these plants match the user. Returns empty string on error."""
+    """Generate a multi-plant write-up explaining why the recommendations are good fits for the user.
+
+    The LLM can be Google Gemini (deployed) or Ollama (local/testing).
+
+    Args:
+        user: Complete user document from Mongo (profile + auth blocks as stored).
+        top_plants: Ordered list of simplified plant dicts (typically up to five ids).
+
+    Returns:
+        Plain-text explanation from the model, or an empty string if the call fails or the
+        input list is empty.
+    """
     if not top_plants:
         return ""
+
     profile_text = _user_profile_to_query(user).replace(" ", ", ")
     plants_text = "\n\n".join(_format_plant_for_llm(p) for p in top_plants)
     user_name = (user.get("profile") or {}).get("name") or (user.get("auth") or {}).get("username") or "you"
+
     system = (
         "You are a friendly plant care expert. For each plant, write 2-4 short sentences explaining why it matches the user. "
         "Use this exact format for each plant (one per line):\n"
@@ -357,6 +424,11 @@ def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
         return ""
 
 
+# =============================================================================
+# HTTP routes (all require a valid JWT)
+# =============================================================================
+
+
 @router.get("/")
 def get_recommendations(
     username: str = Depends(get_current_username),
@@ -364,9 +436,23 @@ def get_recommendations(
     use_rerank: bool = True,
 ):
     """
-    Get plant recommendations for the logged-in user.
-    Fetches user profile from MongoDB, computes user embedding, scores against plant_tower_embedding.
-    use_rerank: if False, skip Cohere reranking (vector search order only).
+    API endpoint to the recommendation pipeline.
+
+    - Runs the entire pipeline (Two-Tower + Reranker)  
+    - Returns ranked plant recommendations for the signed-in user.
+    - Recommendations cached in Redis for 1 hour.
+    
+    Args: 
+        username: Resolved from the JWT by FastAPI dependency injection.
+        k: How many plants to return (defaults to ``DEFAULT_TOP_K``).
+        use_rerank: Default to ``True`` but Set ``False`` to skip Cohere (useful in testing/local development).
+
+    Returns:
+        JSON object: ``username``, ``plants`` (list of scored dicts), and optionally ``message``
+        if the catalog has no embedded plants. 
+
+    Raises:
+        HTTPException: 404 if no user matches the JWT identity.
     """
     user_coll = get_user_collection()
     user = user_coll.find_one({"auth.username": username}) or user_coll.find_one(
@@ -375,29 +461,22 @@ def get_recommendations(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Check if Redis caching is enabled
     use_redis = os.getenv("USE_REDIS_CACHE", "false").lower() in ("true", "1", "yes")
-    if use_redis:
-        cached = get_cached(username, user, k, use_rerank)
+    if use_redis: 
+        # Try to get cached recommendations from Redis
+        cached = get_cached(username, user, k, use_rerank) 
         if cached is not None:
             out = cached
         else:
+            # If no cached recommendations, run the pipeline and cache the results
             out = recommend_for_profile(user, username, k, use_rerank=use_rerank)
             set_cached(username, user, out, k, use_rerank)
     else:
         out = recommend_for_profile(user, username, k, use_rerank=use_rerank)
-    if not out["plants"]:
-        out["message"] = "No plants with embeddings in database. Run upload.py first."
+    if not out["plants"]: # if no plants are found, return a message
+        out["message"] = "No plants with embeddings in database."
     return out
-
-
-@router.get("/cache")
-def get_cache_status(username: str = Depends(get_current_username)):
-    """
-    Inspect Redis cache for recommendations (keys, count, sample).
-    Requires auth. For debugging.
-    """
-    return inspect_cache()
-
 
 @router.get("/explanation")
 def get_explanation(
@@ -405,8 +484,21 @@ def get_explanation(
     username: str = Depends(get_current_username),
 ):
     """
-    Generate LLM explanation for top plants. Call after displaying recommendations.
-    plant_ids: comma-separated, e.g. "0,1,2,3,4"
+    API endpoint to generate a narrative explaining why the listed plants suit this user.
+
+    - Fetches fresh plant metadata from Mongo for the given ids
+    - Generates a narrative explaining why the listed plants suit this user
+
+    Args:
+        plant_ids: Comma-separated Mongo ``plant_id`` integers (e.g. ``"3,7,12"``). Only the
+            first five ids are processed.
+        username: JWT identity; used to load the user document for personalization context.
+
+    Returns:
+        JSON mapping ``explanation`` to the model string, which may be empty if inputs are invalid.
+
+    Raises:
+        HTTPException: 404 when the user record is missing; 400 when ``plant_ids`` is malformed.
     """
     user_coll = get_user_collection()
     plant_coll = get_plant_collection()
