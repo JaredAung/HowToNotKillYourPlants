@@ -1,0 +1,5 @@
+outs:
+- md5: 9027f7a25086244e7a999f54f3c49e6e
+  size: 1635485
+  hash: md5
+  path: synthetic_interactions.json

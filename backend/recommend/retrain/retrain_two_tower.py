@@ -51,9 +51,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 # Paths
-USERS_PATH = ROOT / "resources" / "synthetic_users.json"
-PLANTS_PATH = ROOT / "resources" / "plant_profiles.json"
-INTERACTIONS_PATH = ROOT / "resources" / "interactions.json"
+USERS_PATH = ROOT / "resources" / "data" / "synthetic_users.json"
+PLANTS_PATH = ROOT / "resources" / "data_creating" / "plant_profiles.json"
+INTERACTIONS_PATH = ROOT / "resources" / "two_tower_training" / "synthetic_interactions.json"
 # Fallback: data_creating if interactions generated there
 INTERACTIONS_PATH_ALT = ROOT / "resources" / "data_creating" / "interactions.json"
 OUTPUT_DIR = ROOT / "resources" / "two_tower_training" / "output"
@@ -240,7 +240,7 @@ def _load_merged_interactions(include_real: bool) -> tuple[list[dict], dict[int,
     interactions_path = INTERACTIONS_PATH if INTERACTIONS_PATH.exists() else INTERACTIONS_PATH_ALT
     if not interactions_path.exists():
         raise FileNotFoundError(
-            f"Interactions not found. Run: python -m resources.data_creating.interactions "
+            f"Interactions not found. Run: python -m resources.synthetic_user.generate_interactions "
             f"(or ensure {INTERACTIONS_PATH} or {INTERACTIONS_PATH_ALT} exists)"
         )
 
@@ -448,7 +448,7 @@ def main():
         print(f"  {len(interactions)} interactions, {len(users)} users, {len(plants)} plants")
 
     if not interactions:
-        print("No interactions. Run resources/data_creating/interactions.py first.")
+        print("No interactions. Run: python -m resources.synthetic_user.generate_interactions")
         sys.exit(1)
 
     user_vocabs = {

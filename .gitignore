@@ -28,15 +28,25 @@ frontend/out/
 .DS_Store
 Thumbs.db
 
+# MLflow (local runs / sqlite)
+mlruns/
+mlflow.db
+
 # DVC (model + metrics tracked by DVC, not Git)
+resources/two_tower_training/synthetic_interactions.json
+resources/two_tower_training/two_tower.pt
 resources/two_tower_training/output/two_tower.pt
 resources/two_tower_training/output/retrain_metrics.txt
-resources/two_tower_training/output/baselineVs.txt
+resources/two_tower_training/output/two_tower_eval.json
 # Regenerated from model, not tracked
 resources/two_tower_training/output/plant_embeddings.json
 
 # DVC
 .dvc/cache
 .dvc/tmp
+
+# Feast (generated parquet and local store)
+feature_repo/data/*.parquet
+feature_repo/data/*.db
 
 

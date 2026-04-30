@@ -1,0 +1,73 @@
+{
+  "overconfident_beginner": {
+    "plants_min": 15,
+    "plants_max": 20,
+    "selection": "oracle_negative",
+    "oracle_bias": -0.3,
+    "difficulty_override": 500,
+    "survival_bonus": -0.28
+  },
+  "nervous_nurturer": {
+    "plants_min": 6,
+    "plants_max": 9,
+    "selection": "oracle_positive",
+    "oracle_bias": 0.4,
+    "care_bias": "easy",
+    "survival_bonus": -0.04
+  },
+  "serial_experimenter": {
+    "plants_min": 18,
+    "plants_max": 25,
+    "selection": "care_hard",
+    "oracle_bias": -0.15,
+    "survival_bonus": -0.10
+  },
+  "specialist": {
+    "plants_min": 8,
+    "plants_max": 12,
+    "selection": "niche",
+    "niche": "dry",
+    "oracle_bias": 0.3,
+    "care_bias": "hard",
+    "survival_bonus": -0.05
+  },
+  "recovering_killer": {
+    "plants_min": 10,
+    "plants_max": 14,
+    "selection": "oracle_trend",
+    "early_oracle_bias": 0.3,
+    "late_oracle_bias": 0.3,
+    "survival_bonus": -0.03
+  },
+  "collector": {
+    "plants_min": 22,
+    "plants_max": 30,
+    "selection": "diversity",
+    "diversity_weight": 2.0,
+    "oracle_bias": 0.0,
+    "survival_bonus": -0.43
+  },
+  "climate_mismatch": {
+    "plants_min": 10,
+    "plants_max": 14,
+    "selection": "climate_bias",
+    "climate_bias": "tropical",
+    "oracle_bias": -0.2,
+    "survival_bonus": -0.45
+  },
+  "impulsive_buyer": {
+    "plants_min": 12,
+    "plants_max": 18,
+    "selection": "random",
+    "oracle_bias": 0.0,
+    "survival_bonus": -0.28
+  },
+  "researcher": {
+    "plants_min": 4,
+    "plants_max": 8,
+    "selection": "oracle_positive",
+    "oracle_bias": 0.5,
+    "care_bias": "hard",
+    "survival_bonus": -0.12
+  }
+}

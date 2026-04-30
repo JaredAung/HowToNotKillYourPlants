@@ -1,6 +1,7 @@
 """
 Upload plant profiles with two-tower embeddings to MongoDB.
-Merges plant_profiles.json with plant_embeddings.json (by plant_id) and inserts into PlantCollection.
+Merges plant_profiles.json with plant_embeddings.json (by plant_id) and inserts into the plant
+collection (NEW_PLANT_COLLECTION, default NewPlantCollection).
 """
 import json
 import os
@@ -14,12 +15,14 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 # Paths (relative to resources/)
 ROOT = Path(__file__).resolve().parent.parent
-PLANT_PROFILES_PATH = ROOT / "plant_profiles.json"
+PLANT_PROFILES_PATH = ROOT / "data_creating" / "plant_profiles.json"
 PLANT_EMBEDDINGS_PATH = ROOT / "two_tower_training" / "output" / "plant_embeddings.json"
 
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "HowNotToKillYourPlants")
-PLANT_COLLECTION = os.getenv("PLANT_MONGO_COLLECTION", "PlantCollection")
+PLANT_COLLECTION = os.getenv("NEW_PLANT_COLLECTION") or os.getenv(
+    "PLANT_MONGO_COLLECTION", "NewPlantCollection"
+)
 
 
 def get_plant_collection():

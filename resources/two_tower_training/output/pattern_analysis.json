@@ -1,0 +1,141 @@
+{
+  "oracle_by_label": {
+    "0": {
+      "count": 3842,
+      "mean": 0.36182490890161373,
+      "min": 0.1078,
+      "max": 1.0
+    },
+    "1": {
+      "count": 7364,
+      "mean": 0.4670190793047257,
+      "min": 0.1136,
+      "max": 1.0
+    }
+  },
+  "by_persona": {
+    "overconfident_beginner": {
+      "n": 2118,
+      "positive_rate": 0.5684608120868744,
+      "oracle_match_rate": 0.6968838526912181,
+      "mean_oracle": 0.3900154863078376
+    },
+    "nervous_nurturer": {
+      "n": 765,
+      "positive_rate": 0.8470588235294118,
+      "oracle_match_rate": 0.7124183006535948,
+      "mean_oracle": 0.4033270588235294
+    },
+    "serial_experimenter": {
+      "n": 1723,
+      "positive_rate": 0.7910621009866512,
+      "oracle_match_rate": 0.3615786419036564,
+      "mean_oracle": 0.4697056297156123
+    },
+    "specialist": {
+      "n": 1015,
+      "positive_rate": 0.8866995073891626,
+      "oracle_match_rate": 0.4354679802955665,
+      "mean_oracle": 0.5061316256157635
+    },
+    "recovering_killer": {
+      "n": 857,
+      "positive_rate": 0.8343057176196033,
+      "oracle_match_rate": 0.5635939323220537,
+      "mean_oracle": 0.44454772462077013
+    },
+    "collector": {
+      "n": 1814,
+      "positive_rate": 0.4415656008820287,
+      "oracle_match_rate": 0.581587651598677,
+      "mean_oracle": 0.4450046306504961
+    },
+    "climate_mismatch": {
+      "n": 842,
+      "positive_rate": 0.4418052256532066,
+      "oracle_match_rate": 0.47149643705463185,
+      "mean_oracle": 0.4108187648456057
+    },
+    "impulsive_buyer": {
+      "n": 1480,
+      "positive_rate": 0.5756756756756757,
+      "oracle_match_rate": 0.652027027027027,
+      "mean_oracle": 0.3829464864864865
+    },
+    "researcher": {
+      "n": 592,
+      "positive_rate": 0.8597972972972973,
+      "oracle_match_rate": 0.3277027027027027,
+      "mean_oracle": 0.4573469594594594
+    }
+  },
+  "light": {
+    "mismatch": {
+      "n": 5590,
+      "mean_oracle": 0.3363024150268336,
+      "positive_rate": 0.5858676207513417
+    },
+    "tolerated": {
+      "n": 1852,
+      "mean_oracle": 0.4413673326133909,
+      "positive_rate": 0.6614470842332614
+    },
+    "match": {
+      "n": 3764,
+      "mean_oracle": 0.5663966524973433,
+      "positive_rate": 0.7608926673751328
+    }
+  },
+  "water": {
+    "below": {
+      "n": 3307,
+      "mean_oracle": 0.41980622921076505,
+      "positive_rate": 0.6528575748412458
+    },
+    "above": {
+      "n": 5286,
+      "mean_oracle": 0.38251265607264473,
+      "positive_rate": 0.6118047673098751
+    },
+    "in_range": {
+      "n": 2613,
+      "mean_oracle": 0.5430534634519709,
+      "positive_rate": 0.7543053960964409
+    }
+  },
+  "care": {
+    "ok": {
+      "n": 6283,
+      "mean_oracle": 0.4938336940951774,
+      "positive_rate": 0.7362724812987427
+    },
+    "under": {
+      "n": 4923,
+      "mean_oracle": 0.3507013406459476,
+      "positive_rate": 0.5561649400771888
+    }
+  },
+  "climate": {
+    "far": {
+      "n": 4655,
+      "mean_oracle": 0.36372771213748656,
+      "positive_rate": 0.6038668098818475
+    },
+    "match": {
+      "n": 2234,
+      "mean_oracle": 0.5712347806624888,
+      "positive_rate": 0.7632050134288272
+    },
+    "near": {
+      "n": 4317,
+      "mean_oracle": 0.43084753300903406,
+      "positive_rate": 0.659717396340051
+    }
+  },
+  "model_vs_oracle": {
+    "n": 5000,
+    "correlation_oracle_model": 0.6195,
+    "mean_oracle": 0.4197,
+    "mean_model": 4.5251
+  }
+}

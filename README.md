@@ -97,7 +97,7 @@ Model weights are versioned with **DVC** and stored in Google Drive. Track model
 | --------- | --------------- |
 | **Plant catalog** | 400 plants |
 | **Plant features** | Structured features (light, humidity, water, temp, care level, size, climate) + description embeddings (Voyage) |
-| **Synthetic interactions** | 1,000 users, ~99,900 interactions |
+| **Synthetic interactions** | 810 users (9 personas), ~11,200 interactions |
 | **Real interactions (MongoDB)** | Garden adds (positive), plant deaths (negative), sampled negatives |
 
 ---
@@ -276,9 +276,9 @@ flowchart TD
     end
 
     subgraph Eval["3. Eval (optional)"]
-        MongoUpdate --> BaselineEval[Baseline vs Rec Pipeline Eval]
-        BaselineEval --> BaselineVs[baselineVs.txt]
-        BaselineVs --> DVCAdd2[dvc add baselineVs.txt]
+        MongoUpdate --> TwoTowerEval[Two-tower offline eval]
+        TwoTowerEval --> EvalJson[two_tower_eval.json]
+        EvalJson --> DVCAdd2[dvc add two_tower_eval.json]
     end
 
     subgraph Version["4. Versioning"]
@@ -287,7 +287,7 @@ flowchart TD
     end
 ```
 
-**Flow (Prefect):** `retrain` → `eval` (baseline vs rec) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
+**Flow (Prefect):** `retrain` → `eval` (`python -m resources.two_tower_training.eval` → `two_tower_eval.json`) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
 
 **Death penalty vs retraining:** The death penalty is a **short-term** fix until the next retrain. Once retraining runs with the latest garden and death data, the model learns failures directly; the penalty continues to provide an extra safety margin.
 
@@ -325,6 +325,147 @@ flowchart TD
 | Hit Rate   | +38% | +36% | +35%  |
 
 **Latency:** The pipeline (~1049 ms) is ~40× slower than the baseline (~25 ms). Latency is primarily introduced by the **semantic reranking stage** (~900 ms via Cohere API). Future optimizations: replace external reranker with a local cross-encoder, cache plant embeddings, reduce candidate size before reranking.
+
+---
+
+# 🧪 Synthetic Data Generation
+
+The model is bootstrapped with synthetic data before any real users exist. The pipeline generates realistic user-plant interactions with ground-truth survival labels via a deterministic **oracle**.
+
+## Pipeline
+
+```
+personas.json → generate_users.py → synthetic_users.json
+                                          ↓
+plants catalog + synthetic_users → generate_interactions.py → synthetic_interactions.json
+```
+
+1. **`generate_users.py`** — creates 810 synthetic users from 9 persona templates (`overconfident_beginner`, `nervous_nurturer`, `serial_experimenter`, `specialist`, `recovering_killer`, `collector`, `climate_mismatch`, `impulsive_buyer`, `researcher`). Each persona defines care level, climate, zone range, and feature distributions. Users are sampled with balanced randomization within each persona's pool.
+
+2. **`generate_interactions.py`** — assigns plants to users via persona-driven selection, computes an `oracle_score` for each user-plant pair, and stochastically generates survival labels.
+
+## Oracle Score
+
+The oracle computes a **weighted compatibility score** (0–1) between user environment and plant requirements across 6 features:
+
+| Feature | Weight | Scoring |
+|---------|--------|---------|
+| Light | 0.22 | Ordinal distance: `1/(1+distance)` on `[full shade, partial, full sun]` |
+| Water | 0.27 | Distance outside `[ideal_days, tolerated_days]`: `1/(1+distance)` |
+| Soil | 0.18 | Ordinal distance: `1/(1+distance)` on `[light, medium, heavy]` |
+| Care level | 0.13 | Asymmetric: `user_skill >= plant_difficulty` is fine; lower skill is penalized |
+| Climate | 0.10 | Ordinal distance on `[alpine, arid, mediterranean, temperate, tropical]` |
+| Zone | 0.10 | Continuous partial credit: `overlap / user_zone_span` |
+
+A **cumulative mismatch decay** (`MISMATCH_DECAY = 0.87`) multiplies the score for each imperfect feature, making multiple small mismatches compound: `final = base × 0.87^num_mismatches`.
+
+## Survival Label Generation
+
+The oracle score is modified before stochastic label sampling:
+
+1. **Overload penalty** — if a user's total plant `difficulty_score` exceeds their care-level threshold (`easy=100`, `medium=200`, `hard=400`), survival is reduced: `penalty = (1 - 1/(1 + 0.20 × excess/100)) × 0.18`
+2. **Persona survival bonus** — a flat modifier per persona (ranges from -0.03 to -0.45)
+3. **Baseline boost** (+0.55) — shifts overall positive rate to 65–80%
+4. **Clamp** to [0.05, 0.95] and **stochastic sampling** — `label = 1 if random() < survival_prob else 0`
+
+## Persona-Driven Plant Selection
+
+Each persona has a selection strategy that biases which plants a user receives:
+
+| Strategy | Personas | Effect |
+|----------|----------|--------|
+| `oracle_positive` | researcher, nervous_nurturer | Preferentially picks high-compatibility plants |
+| `oracle_negative` | overconfident_beginner | Picks low-compatibility plants |
+| `oracle_trend` | recovering_killer | Early plants = bad matches, late = good (learning arc) |
+| `care_hard` | serial_experimenter | Weights hard-care plants 2× |
+| `niche` | specialist | Weights dry/low-water plants 3× |
+| `climate_bias` | climate_mismatch | Weights tropical plants 2× (despite alpine zone) |
+| `diversity` | collector | Maximizes variety across layer, climate, family |
+| `random` | impulsive_buyer | No bias |
+
+---
+
+# 🔍 Model Verification & Findings
+
+After training, we verified whether the two-tower model learned the oracle's encoded patterns. Each pattern was analyzed in a dedicated notebook under `resources/verify/`.
+
+## Verified Patterns
+
+### 1. Feature Priority (`feature compactability/`)
+
+**Oracle:** Care and light mismatches should be most detrimental.
+
+**Finding: Confirmed.** Survival drop when mismatched:
+
+| Feature | Survival Drop | Model Score Drop |
+|---------|--------------|-----------------|
+| Care | 0.180 (highest) | Highest |
+| Light | 0.142 | Second |
+| Climate | 0.132 | — |
+| Zone | 0.127 | — |
+| Water | 0.127 | — |
+| Soil | 0.094 (lowest) | Lowest |
+
+The model correctly ranks care and light as the top two most impactful features.
+
+### 2. Cumulative Mismatch Penalty (`cumulative mismatch/`)
+
+**Oracle:** `MISMATCH_DECAY = 0.87` compounds per mismatch — 4 mismatches yields `0.87⁴ ≈ 0.57×` score.
+
+**Finding: Confirmed.** Both survival rate and model score drop non-linearly as mismatch count increases, matching the compound decay curve.
+
+### 3. Ordinal Penalties (`ordinal penalities/`)
+
+**Oracle:** Light, soil, and climate use `1/(1+distance)` on ordinal scales, giving partial credit for near-misses.
+
+**Finding: Confirmed.** Survival and model scores decrease gradually with ordinal distance. Distance=1 is penalized less than distance=2, matching the gradual curve.
+
+### 4. Zone Partial Overlap (`zone overlap/`)
+
+**Oracle:** USDA zones use continuous `overlap / user_span` rather than binary match.
+
+**Finding: Confirmed.** Survival rate increases from ~0.55 (overlap=0) to ~0.85 (overlap=4) following a smooth gradient. The model tracks this trend with a strong upward slope.
+
+### 5. Water Gradual Penalty (`water gradual/`)
+
+**Oracle:** Water frequency outside `[ideal_days, tolerated_days]` is penalized by `1/(1+distance)`.
+
+**Finding: Confirmed.** The three-bucket analysis (below / in range / above) clearly shows "in range" with highest survival (~0.80), and both under-watering and over-watering penalized. The model mirrors this pattern.
+
+### 6. Overload Penalty (`overload penalty/`)
+
+**Oracle:** When total plant difficulty exceeds care-level thresholds, survival drops gradually.
+
+**Finding: Partially confirmed.** Survival clearly decreases as excess difficulty increases within each care level. The model shows some sensitivity but the signal is weaker — this is a **user-level aggregate effect** that the model can only infer indirectly from embeddings.
+
+### 7. Persona Effects (`persona effects/`)
+
+**Oracle:** 9 personas with different selection strategies, portfolio sizes, and survival bonuses create varying survival rates.
+
+**Finding: Partially confirmed.**
+
+- Survival ranking across personas matches the oracle's design exactly (worst: `collector` at ~0.44, best: `specialist` at ~0.89).
+- Survival ↔ model score correlation: **r = 0.455** (moderate positive).
+- The model correctly assigns lower scores to personas with poor feature matches (`overconfident_beginner`, `impulsive_buyer`) and higher scores to well-matched ones (`specialist`, `researcher`).
+
+## Summary of Model Strengths & Limitations
+
+### What the Model Learns Well
+
+- **Feature-level compatibility** — care, light, soil, water, zone, climate matching are all captured with correct priority ranking.
+- **Gradual penalties** — ordinal distances, zone overlap fractions, and water proximity are learned as smooth gradients, not binary thresholds.
+- **Compound mismatch decay** — multiple mismatches are penalized non-linearly, matching the oracle's design.
+- **Persona separation via features** — personas that create genuinely poor feature matches get low model scores.
+
+### What the Model Struggles With
+
+- **User-level aggregate effects** — the overload penalty (based on total portfolio difficulty) is weakly captured because it's not a pairwise feature; it depends on the user's entire plant collection.
+- **Hidden survival bonuses** — the oracle's flat per-persona `survival_bonus` (up to -0.45) is invisible to the model since persona identity isn't in the embedding. Oracle bonus ↔ model correlation is only **r = 0.313**.
+- **Behavioral patterns** — personas like `nervous_nurturer` (high survival through safe choices) get unexpectedly low model scores because their conservative feature matches don't produce high dot-product similarity.
+
+### Interpretation
+
+The model is designed for **pairwise user-plant compatibility scoring**, and it does this well. The limitations are by design — effects that depend on the user's full portfolio (overload) or hidden modifiers (persona bonus) cannot be captured from a single user-plant embedding pair. For a recommendation system, this is the correct behavior: the model recommends plants that are a good feature match, while portfolio-level concerns (overload, diversity) would need to be handled at a higher layer.
 
 ---
 
@@ -470,6 +611,17 @@ HowToKeepYourPlantsAlive
 ├── resources
 │   ├── two_tower_training
 │   ├── data_creating
+│   ├── synthetic_user
+│   ├── data
+│   ├── ETL
+│   ├── verify
+│   │   ├── feature compactability
+│   │   ├── cumulative mismatch
+│   │   ├── ordinal penalities
+│   │   ├── zone overlap
+│   │   ├── water gradual
+│   │   ├── overload penalty
+│   │   └── persona effects
 │   └── schema
 │
 └── .env
@@ -493,7 +645,8 @@ JWT_SECRET=your-secret
 MONGO_USER_PROFILES_COLLECTION=UserCollection
 MONGO_USER_GARDEN_COLLECTION=User_Garden_Collection
 PLANT_DEATH_COLLECTION=PlantDeathCollection
-PLANT_MONGO_COLLECTION=PlantCollection
+NEW_PLANT_COLLECTION=NewPlantCollection
+# Legacy: PLANT_MONGO_COLLECTION used only if NEW_PLANT_COLLECTION is unset
 
 # ML & APIs
 VOYAGE_API_KEY=...
@@ -517,9 +670,9 @@ USE_GEMINI=true
 
 ## MongoDB Vector Index
 
-Create a vector search index on `PlantCollection`:
+Create a vector search index on your plant catalog (default `NewPlantCollection`; set `NEW_PLANT_COLLECTION` to match):
 
-1. Atlas → Database → PlantCollection → Search Indexes
+1. Atlas → Database → (your plant collection) → Search Indexes
 2. Create index (JSON editor) from `resources/vector_index_definition.json`
 3. Index name must match `VECTOR_SEARCH_INDEX` (default: `vector_index`)
 
@@ -600,8 +753,9 @@ dvc pull
 |------|------|
 | Model | `resources/two_tower_training/output/two_tower.pt` |
 | Metrics | `resources/two_tower_training/output/retrain_metrics.txt` |
-| Baseline vs rec | `resources/two_tower_training/output/baselineVs.txt` |
-| DVC pointers | `*.dvc` in `resources/two_tower_training/output/` |
+| Offline eval (two-tower + optional semantic baseline) | `resources/two_tower_training/output/two_tower_eval.json` |
+| Synthetic interactions | `resources/two_tower_training/synthetic_interactions.json` (see `synthetic_interactions.json.dvc`) |
+| DVC pointers | `*.dvc` under `resources/two_tower_training/` and `output/` |
 | Plant embeddings | `resources/two_tower_training/output/plant_embeddings.json` |
 | Drive folder | [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH) |
 
@@ -611,7 +765,7 @@ dvc pull
 pip install prefect
 python -m backend.recommend.retrain.prefect_flow
 python -m backend.recommend.retrain.prefect_flow --dvc-push   # retrain + push to Drive
-python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip baseline vs rec eval
+python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip offline eval JSON export
 ```
 
 ---
