@@ -21,7 +21,36 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+
+def _repo_root_for_resources() -> Path:
+    """
+    Directory that contains the ``resources/`` tree (sibling of ``backend/`` in this repo).
+
+    Walks upward from this file so layouts like ``/app/backend/recommend/`` and monorepo
+    prefixes both work. Override with env ``RESOURCES_REPO_ROOT`` if needed.
+    """
+    override = (os.getenv("RESOURCES_REPO_ROOT") or "").strip()
+    if override:
+        p = Path(override).expanduser().resolve()
+        if (p / "resources" / "ETL" / "feature_engineer.py").is_file():
+            return p
+        raise RuntimeError(
+            f"RESOURCES_REPO_ROOT={override!r} does not contain resources/ETL/feature_engineer.py"
+        )
+
+    here = Path(__file__).resolve()
+    for base in [here.parent, *here.parents]:
+        if (base / "resources" / "ETL" / "feature_engineer.py").is_file():
+            return base
+
+    raise RuntimeError(
+        "Could not locate the repo ``resources/`` tree (need resources/ETL/feature_engineer.py). "
+        "Deploy must include the ``resources/`` directory next to ``backend/`` (see Dockerfile), "
+        "or set RESOURCES_REPO_ROOT to the directory that contains ``resources/``."
+    )
+
+
+_ROOT = _repo_root_for_resources()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

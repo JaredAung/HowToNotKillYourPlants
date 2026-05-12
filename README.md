@@ -565,7 +565,7 @@ See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment instructions.
 | **Embeddings**      | Voyage AI                         |
 | **Reranking**       | Cohere                            |
 | **LLM Framework**   | LangChain + LangGraph             |
-| **LLM Runtime**     | Ollama                            |
+| **LLM Runtime**     | Google Gemini                     |
 | **External Search** | Tavily                            |
 | **Model Versioning**| DVC (Google Drive)                |
 
@@ -647,10 +647,9 @@ VECTOR_SEARCH_INDEX=vector_index
 USE_RERANK=true
 NEXT_PUBLIC_API_URL=http://localhost:8000
 
-# LLM (chat assistant): USE_GEMINI=true (default) or false for Ollama
-USE_GEMINI=true
-# For Gemini: GEMINI_API_KEY=... and optionally GEMINI_MODEL=gemini-2.5-flash
-# For Ollama: OLLAMA_HOST=http://localhost:11434, OLLAMA_MODEL=llama3.2
+# LLM: Google Gemini (LangGraph, search, recommendation text)
+GEMINI_API_KEY=...
+# Optional: GEMINI_MODEL=gemini-2.5-flash
 ```
 
 ---

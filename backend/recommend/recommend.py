@@ -30,7 +30,7 @@ import logging
 
 from auth.jwt import get_current_username # get the logged in user's username
 from database import get_plant_collection, get_user_collection # get the MongoDB collections
-from llm import ollama_generate  # NL explanation (always Ollama; OLLAMA_MODEL / OLLAMA_HOST)
+from llm import gemini_generate
 from plant.mongo_plant import flatten_catalog_plant_for_api
 from recommend.cache import get_deck, inspect_cache, set_deck
 from recommend.feature_loader import compute_user_embedding, score_plants  # TwoTowerModel user tower (149-d input → 64-d L2)
@@ -536,7 +536,7 @@ def _format_plant_for_llm(p: dict) -> str:
 def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
     """Generate a multi-plant write-up explaining why the recommendations are good fits for the user.
 
-    Uses local Ollama only (``OLLAMA_HOST``, ``OLLAMA_MODEL``); LangGraph chat uses Gemini separately.
+    Uses ``gemini_generate`` (Google Gemini; same ``GEMINI_API_KEY`` / ``GEMINI_MODEL`` as chat).
 
     Args:
         user: Complete user document from Mongo (profile + auth blocks as stored).
@@ -569,12 +569,11 @@ def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
         f"Explain why each plant is a good match for {user_name}. Use the format: • **Name (Latin)**: explanation"
     )
     try:
-        return ollama_generate(system=system, user_message=user_msg)
+        return gemini_generate(system=system, user_message=user_msg)
     except Exception as e:
         logging.warning(
-            "Ollama explanation failed (%s). Target=%s (ensure `ollama serve` or Ollama.app is running)",
+            "Gemini explanation failed (%s). Check GEMINI_API_KEY / GOOGLE_API_KEY and GEMINI_MODEL.",
             e,
-            os.getenv("OLLAMA_HOST", "http://localhost:11434"),
         )
         return ""
 

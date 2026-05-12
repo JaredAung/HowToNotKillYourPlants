@@ -15,7 +15,7 @@ from chat.agent_tools import (
 )
 from chat.chat import State
 from chat.rag_trace import log_rag_retrieval
-from llm import ollama_llm
+from llm import gemini_llm
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ Examples:
 Reply with ONLY the plant name, search query, or "selected_plant". If unclear, return selected_plant."""),
         ("human", "{message}"),
     ])
-    response = (extract_prompt | ollama_llm).invoke({"message": user_content})
+    response = (extract_prompt | gemini_llm).invoke({"message": user_content})
     raw = getattr(response, "content", str(response)) or ""
     extracted = raw.strip()
     _debug("_extract_explore_query LLM raw response", raw)
@@ -231,7 +231,7 @@ Reply with only the final message to the user."""),
                 if pfaff_knowledge
                 else ""
             )
-            response = (prompt | ollama_llm).invoke({
+            response = (prompt | gemini_llm).invoke({
                 "user_profile": user_profile_str,
                 "user_query": user_content,
                 "search_query": search_query,

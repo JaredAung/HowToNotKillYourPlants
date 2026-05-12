@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 
+# Build with repository root as context so ``backend/`` and ``resources/`` both exist under /app.
 WORKDIR /app
 
 COPY backend/requirements.txt .

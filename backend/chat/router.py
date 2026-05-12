@@ -9,7 +9,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from chat.chat import State
-from llm import ollama_llm
+from llm import gemini_llm
 
 PHASES: tuple[str, ...] = ("EXPAND", "COMPARE", "SHOP", "GUIDE", "PICK")
 Phase = Literal["EXPAND", "COMPARE", "SHOP", "GUIDE", "PICK"]
@@ -61,7 +61,7 @@ def route_to_phase(state: State) -> str:
     print("[ROUTER] state.selected_plant:", bool(selected))
     print("[ROUTER] context (last msgs):", context[:500] if context else "(empty)")
 
-    chain = ROUTER_PROMPT | ollama_llm
+    chain = ROUTER_PROMPT | gemini_llm
     response = chain.invoke({"context": context})
     content = getattr(response, "content", str(response)).strip().upper()
 

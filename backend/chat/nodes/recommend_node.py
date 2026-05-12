@@ -154,7 +154,7 @@ def recommend_agent(state: dict) -> dict:
     """
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
-    from llm import ollama_llm
+    from llm import gemini_llm
 
     messages = list(state.get("messages") or [])
     user_id = (state.get("user_id") or "").strip()
@@ -173,7 +173,7 @@ def recommend_agent(state: dict) -> dict:
         content=_RECOMMEND_SYSTEM + f"\n\nAuthenticated username (use for recommend_plants_for_user): {user_id}"
     )
 
-    llm_tools = ollama_llm.bind_tools([recommend_plants_for_user])
+    llm_tools = gemini_llm.bind_tools([recommend_plants_for_user])
 
     try:
         ai = llm_tools.invoke([system, *lc_msgs])
@@ -212,7 +212,7 @@ def recommend_agent(state: dict) -> dict:
                 tool_msgs.append(ToolMessage(content=f"Unknown tool: {name}", tool_call_id=tid))
 
         try:
-            final = ollama_llm.invoke([system, *lc_msgs, ai, *tool_msgs])
+            final = gemini_llm.invoke([system, *lc_msgs, ai, *tool_msgs])
             reply = getattr(final, "content", None) or str(final)
         except Exception as e:
             logger.exception("recommend_agent second LLM call failed")

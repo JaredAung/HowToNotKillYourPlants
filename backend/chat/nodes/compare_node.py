@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from chat.agent_tools import format_tower_profile_for_llm, retrieve_pfaff_plant_knowledge, retrieve_plant_profile
 from chat.chat import State
 from chat.rag_trace import log_rag_retrieval
-from llm import ollama_llm
+from llm import gemini_llm
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ plant2
 FOCUS: <focus or None>"""),
         ("human", "User: {message}"),
     ])
-    response = (extract_prompt | ollama_llm).invoke({
+    response = (extract_prompt | gemini_llm).invoke({
         "message": user_content,
         "selected_context": selected_context or "",
     })
@@ -326,7 +326,7 @@ Use catalog plant profiles and any **PFAF / Plants For A Future** excerpts provi
 Write a friendly, structured comparison (2-5 short paragraphs or bullet points). Be concise but informative."""),
                     ("human", "User profile:\n{user_profile}\n\nUser asked: {user_query}\n\n{plants_text}\n\n{pfaff_section}"),
                 ])
-                response = (prompt | ollama_llm).invoke({
+                response = (prompt | gemini_llm).invoke({
                     "user_profile": user_profile_str,
                     "user_query": user_content,
                     "plants_text": plants_text,
