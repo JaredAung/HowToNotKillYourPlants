@@ -5,18 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getToken, updateProfile } from "@/lib/api";
 
+/** Same strings as plant catalog / ``ORDINAL_ORDERS.light`` (stored as ``environment.light_level``). */
 const LIGHT_OPTIONS = [
-  { id: "direct", label: "Direct", icon: "🌞", desc: "Full sun, south-facing window" },
-  { id: "bright_light", label: "Bright light", icon: "☀️", desc: "Several hours of sun" },
-  { id: "bright_indirect", label: "Bright indirect", icon: "🌤️", desc: "Sun filtered through sheer" },
-  { id: "indirect", label: "Indirect", icon: "🌥️", desc: "No direct rays" },
-  { id: "diffused", label: "Diffused", icon: "🌫️", desc: "Soft, even light" },
-];
-
-const HUMIDITY_OPTIONS = [
-  { id: "low", label: "Low", desc: "Dry air" },
-  { id: "medium", label: "Medium", desc: "Moderate humidity" },
-  { id: "high", label: "High", desc: "Humid" },
+  { id: "full shade", label: "Full shade", icon: "🌫️", desc: "Low light, north window or deep shade" },
+  { id: "partial sun/shade", label: "Partial sun / shade", icon: "🌤️", desc: "Bright indirect, east/west, filtered sun" },
+  { id: "full sun", label: "Full sun", icon: "☀️", desc: "Direct sun several hours, south-facing" },
 ];
 
 const CARE_LEVEL_OPTIONS = [
@@ -32,51 +25,53 @@ const SIZE_OPTIONS = [
 ];
 
 const CLIMATE_OPTIONS = [
-  { id: "Arid Tropical", label: "Arid Tropical" },
-  { id: "Subtropical", label: "Subtropical" },
-  { id: "Subtropical arid", label: "Subtropical arid" },
-  { id: "Tropical", label: "Tropical" },
-  { id: "Tropical humid", label: "Tropical humid" },
+  { id: "alpine", label: "Alpine", desc: "Cool, high elevation" },
+  { id: "arid", label: "Arid", desc: "Dry climates" },
+  { id: "mediterranean", label: "Mediterranean", desc: "Mild, wet winters / dry summers" },
+  { id: "temperate", label: "Temperate", desc: "Four seasons" },
+  { id: "tropical", label: "Tropical", desc: "Warm, humid" },
 ];
 
-const HARD_NO_OPTIONS = [
-  { id: "frequent_watering", label: "Frequent watering" },
+const SOIL_OPTIONS = [
+  { id: "light", label: "Light", desc: "Sandy, drains fast" },
+  { id: "medium", label: "Medium", desc: "Loamy" },
+  { id: "heavy", label: "Heavy", desc: "Clay-rich" },
 ];
 
-const CARD_BTN = "px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all border-sage-200 text-forest-600";
-const CARD_BTN_SEL = "border-forest-600 bg-forest-50 text-forest-800";
+const GROWTH_OPTIONS = [
+  { id: "slow", label: "Slow", desc: "Gradual" },
+  { id: "med", label: "Medium", desc: "Moderate pace" },
+  { id: "fast", label: "Fast", desc: "Vigorous" },
+];
+
+const WATER_OPTIONS = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+];
 
 function CardSelect<T extends string>({
   options,
   value,
   onChange,
-  multi,
 }: {
-  options: { id: T; label: string; icon?: string; desc?: string }[];
-  value: T | T[] | null;
-  onChange: (v: T | T[]) => void;
-  multi?: boolean;
+  options: { id: T; label: string }[];
+  value: T | null;
+  onChange: (v: T) => void;
 }) {
-  const sel = (id: T) => {
-    if (multi && Array.isArray(value)) {
-      const next = value.includes(id) ? value.filter((x) => x !== id) : [...value, id];
-      onChange(next);
-    } else {
-      onChange(id);
-    }
-  };
   return (
     <div className="flex flex-wrap gap-2">
       {options.map((opt) => {
-        const isSel = multi && Array.isArray(value) ? value.includes(opt.id) : value === opt.id;
+        const isSel = value === opt.id;
         return (
           <button
             key={opt.id}
             type="button"
-            onClick={() => sel(opt.id)}
-            className={`${CARD_BTN} ${isSel ? CARD_BTN_SEL : ""}`}
+            onClick={() => onChange(opt.id)}
+            className={`px-4 py-2.5 rounded-lg border-2 font-medium text-sm transition-all border-sage-200 text-forest-600 ${
+              isSel ? "border-forest-600 bg-forest-50 text-forest-800" : ""
+            }`}
           >
-            {opt.icon && <span className="mr-1">{opt.icon}</span>}
             {opt.label}
           </button>
         );
@@ -87,16 +82,14 @@ function CardSelect<T extends string>({
 
 function LightCards({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
   const lightVisuals: Record<string, { bg: string; rays: string }> = {
-    direct: { bg: "bg-amber-300", rays: "opacity-100" },
-    bright_light: { bg: "bg-amber-200", rays: "opacity-90" },
-    bright_indirect: { bg: "bg-amber-100", rays: "opacity-60" },
-    indirect: { bg: "bg-sage-200", rays: "opacity-40" },
-    diffused: { bg: "bg-sage-100", rays: "opacity-25" },
+    "full shade": { bg: "bg-sage-100", rays: "opacity-25" },
+    "partial sun/shade": { bg: "bg-amber-100", rays: "opacity-60" },
+    "full sun": { bg: "bg-amber-300", rays: "opacity-100" },
   };
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {LIGHT_OPTIONS.map((opt) => {
-        const v = lightVisuals[opt.id] || lightVisuals.diffused;
+        const v = lightVisuals[opt.id] ?? lightVisuals["partial sun/shade"];
         return (
           <button
             key={opt.id}
@@ -118,80 +111,54 @@ function LightCards({ value, onChange }: { value: string | null; onChange: (v: s
   );
 }
 
-function YesNo({ value, onChange }: { value: boolean | null; onChange: (v: boolean) => void }) {
-  return (
-    <div className="flex gap-3">
-      <button
-        type="button"
-        onClick={() => onChange(true)}
-        className={`flex-1 py-3 rounded-lg border-2 font-medium transition-all ${
-          value === true ? "border-forest-600 bg-forest-50 text-forest-800" : "border-sage-200 text-forest-600"
-        }`}
-      >
-        Yes
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange(false)}
-        className={`flex-1 py-3 rounded-lg border-2 font-medium transition-all ${
-          value === false ? "border-forest-600 bg-forest-50 text-forest-800" : "border-sage-200 text-forest-600"
-        }`}
-      >
-        No
-      </button>
-    </div>
-  );
-}
-
-function buildProfileJson(username: string, form: {
-  name: string; avatarUrl: string;
-  city: string; state: string; postalCode: string; country: string;
+/** Payload aligned with GET /profile and two-tower feature_loader. */
+function buildTowerProfileJson(username: string, form: {
+  displayName: string;
   climate: string | null;
-  lightLevel: string | null; humidityLevel: string | null; tempMinF: string; tempMaxF: string;
-  hasKids: boolean | null;
-  careLevel: string | null; preferredSize: string | null; hardNo: string[];
-  wateringFreq: string | null; careFreq: string | null;
+  usdaZoneMin: string;
+  usdaZoneMax: string;
+  lightLevel: string | null;
+  soilPreference: string | null;
+  growthPref: string | null;
+  tempMinF: string;
+  tempMaxF: string;
+  careLevel: string | null;
+  preferredSize: string | null;
+  wateringFreq: string | null;
 }) {
-  const obj: Record<string, unknown> = {
-    auth: { username },
+  const parseZone = (s: string) => {
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) ? Math.min(13, Math.max(1, n)) : null;
+  };
+  const zmin = form.usdaZoneMin.trim() ? parseZone(form.usdaZoneMin) : null;
+  const zmax = form.usdaZoneMax.trim() ? parseZone(form.usdaZoneMax) : null;
+  return {
+    username,
     profile: {
-      name: form.name || null,
-      avatar_url: form.avatarUrl || null,
-    },
-    location: {
-      city: form.city || null,
-      state: form.state || null,
-      postal_code: form.postalCode || null,
-      country: form.country || null,
+      name: form.displayName.trim() || null,
     },
     climate: form.climate,
+    ...(zmin != null ? { usda_zone_min: zmin } : {}),
+    ...(zmax != null ? { usda_zone_max: zmax } : {}),
     environment: {
       light_level: form.lightLevel,
-      humidity_level: form.humidityLevel,
+      soil_preference: form.soilPreference,
       temperature_pref: {
         min_f: form.tempMinF ? parseFloat(form.tempMinF) : null,
         max_f: form.tempMaxF ? parseFloat(form.tempMaxF) : null,
       },
     },
-    safety: {
-      has_kids: form.hasKids,
-    },
     constraints: {
       preferred_size: form.preferredSize,
-      hard_no: form.hardNo,
     },
     preferences: {
       care_level: form.careLevel,
+      growth_pref: form.growthPref,
       care_preferences: {
         watering_freq: form.wateringFreq,
-        care_freq: form.careFreq,
       },
     },
-    gamification: { care_points: 0, care_level: 0, streak_days: 0, multiplier: 1, badges: [] },
-    social: { friends: [], neighborhood_id: null },
-    history: { owned_plants_count: 0, deaths_count: 0, average_health_score: 0, last_death_reason: null },
   };
-  return obj;
 }
 
 export default function OnboardingPage() {
@@ -202,36 +169,20 @@ export default function OnboardingPage() {
   const [extractedJson, setExtractedJson] = useState<Record<string, unknown> | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Profile
-  const [name, setName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
-
-  // Location
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [postalCode, setPostalCode] = useState("");
-  const [country, setCountry] = useState("US");
-
-  // Climate
+  const [displayName, setDisplayName] = useState("");
   const [climate, setClimate] = useState<string | null>(null);
+  const [usdaZoneMin, setUsdaZoneMin] = useState("");
+  const [usdaZoneMax, setUsdaZoneMax] = useState("");
 
-  // Environment
   const [lightLevel, setLightLevel] = useState<string | null>(null);
-  const [humidityLevel, setHumidityLevel] = useState<string | null>(null);
-  const [tempMinF, setTempMinF] = useState<string>("");
-  const [tempMaxF, setTempMaxF] = useState<string>("");
+  const [tempMinF, setTempMinF] = useState("");
+  const [tempMaxF, setTempMaxF] = useState("");
+  const [soilPreference, setSoilPreference] = useState<string | null>(null);
+  const [growthPref, setGrowthPref] = useState<string | null>(null);
 
-  // Safety
-  const [hasKids, setHasKids] = useState<boolean | null>(null);
-
-  // Constraints
   const [careLevel, setCareLevel] = useState<string | null>(null);
   const [preferredSize, setPreferredSize] = useState<string | null>(null);
-  const [hardNo, setHardNo] = useState<string[]>([]);
-
-  // Preferences
   const [wateringFreq, setWateringFreq] = useState<string | null>(null);
-  const [careFreq, setCareFreq] = useState<string | null>(null);
 
   const [userLoading, setUserLoading] = useState(true);
   useEffect(() => {
@@ -244,11 +195,18 @@ export default function OnboardingPage() {
         return;
       }
       try {
-        const { getMe } = await import("@/lib/api");
+        const { getMe, getProfile } = await import("@/lib/api");
         const me = await getMe();
         if (me?.username) {
           setUsername(me.username);
           window.sessionStorage.setItem("userUsername", me.username);
+        }
+        try {
+          const prof = await getProfile();
+          const n = prof && typeof prof === "object" && "profile" in prof ? (prof as { profile?: { name?: string } }).profile?.name : undefined;
+          if (typeof n === "string" && n.trim()) setDisplayName(n.trim());
+        } catch {
+          // ignore
         }
       } catch {
         // No token or expired
@@ -273,34 +231,35 @@ export default function OnboardingPage() {
     setSubmitError(null);
     try {
       await updateProfile({
-        name: name || undefined,
-        avatar_url: avatarUrl || undefined,
-        city: city || undefined,
-        state: state || undefined,
-        postal_code: postalCode || undefined,
-        country: country || undefined,
+        name: displayName.trim(),
         climate: climate || undefined,
         light_level: lightLevel || undefined,
-        humidity_level: humidityLevel || undefined,
+        soil_preference: soilPreference || undefined,
         temp_min_f: tempMinF ? parseFloat(tempMinF) : undefined,
         temp_max_f: tempMaxF ? parseFloat(tempMaxF) : undefined,
-        has_kids: hasKids,
         care_level: careLevel || undefined,
+        growth_pref: growthPref || undefined,
         preferred_size: preferredSize || undefined,
-        hard_no: hardNo.length ? hardNo : undefined,
         watering_freq: wateringFreq || undefined,
-        care_freq: careFreq || undefined,
+        usda_zone_min: usdaZoneMin.trim() ? parseInt(usdaZoneMin, 10) : undefined,
+        usda_zone_max: usdaZoneMax.trim() ? parseInt(usdaZoneMax, 10) : undefined,
       });
-      const json = buildProfileJson(username, {
-        name, avatarUrl,
-        city, state, postalCode, country,
-        climate,
-        lightLevel, humidityLevel, tempMinF, tempMaxF,
-        hasKids,
-        careLevel, preferredSize, hardNo,
-        wateringFreq, careFreq,
-      });
-      setExtractedJson(json);
+      setExtractedJson(
+        buildTowerProfileJson(username, {
+          displayName,
+          climate,
+          usdaZoneMin,
+          usdaZoneMax,
+          lightLevel,
+          soilPreference,
+          growthPref,
+          tempMinF,
+          tempMaxF,
+          careLevel,
+          preferredSize,
+          wateringFreq,
+        }) as Record<string, unknown>
+      );
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Profile update failed");
     } finally {
@@ -333,7 +292,6 @@ export default function OnboardingPage() {
     );
   }
 
-  // Show extracted JSON after successful submit
   if (extractedJson) {
     return (
       <div className="min-h-screen px-4 py-8 bg-gradient-to-b from-sage-50 to-forest-50">
@@ -343,8 +301,8 @@ export default function OnboardingPage() {
             <span className="font-medium">How to Keep Your Plants Alive</span>
           </Link>
           <div className="bg-white/80 backdrop-blur rounded-2xl shadow-leaf border border-sage-200/60 p-8">
-            <h1 className="text-xl font-semibold text-forest-800 mb-2">Your profile (extracted)</h1>
-            <p className="text-sm text-forest-600 mb-4">Here&apos;s your info in the schema format:</p>
+            <h1 className="text-xl font-semibold text-forest-800 mb-2">Your recommendation profile</h1>
+            <p className="text-sm text-forest-600 mb-4">Saved fields used for the same user tower as model training:</p>
             <pre className="p-4 rounded-lg bg-sage-100 text-forest-800 text-sm overflow-x-auto overflow-y-auto max-h-[60vh] border border-sage-200">
               {JSON.stringify(extractedJson, null, 2)}
             </pre>
@@ -369,16 +327,15 @@ export default function OnboardingPage() {
         </Link>
 
         <div className="bg-white/80 backdrop-blur rounded-2xl shadow-leaf border border-sage-200/60 p-8">
-          <h1 className="text-xl font-semibold text-forest-800 mb-2">Tell us about your space</h1>
-          <p className="text-sm text-forest-600 mb-6">We&apos;ll use this to recommend the right plants for you.</p>
+          <h1 className="text-xl font-semibold text-forest-800 mb-2">Your growing conditions</h1>
+          <p className="text-sm text-forest-600 mb-6">
+            Same inputs as the two-tower recommendation model (climate, light, soil, growth, temps, care, size,
+            watering, USDA zones).
+          </p>
 
-          {/* Step indicator */}
           <div className="flex gap-2 mb-6">
-            {[1, 2, 3, 4].map((s) => (
-              <div
-                key={s}
-                className={`h-1.5 flex-1 rounded-full ${step >= s ? "bg-forest-600" : "bg-sage-200"}`}
-              />
+            {[1, 2, 3].map((s) => (
+              <div key={s} className={`h-1.5 flex-1 rounded-full ${step >= s ? "bg-forest-600" : "bg-sage-200"}`} />
             ))}
           </div>
 
@@ -387,52 +344,35 @@ export default function OnboardingPage() {
               <>
                 <div className={sectionCls}>
                   <label className={labelCls}>Name (optional)</label>
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Your name" />
+                  <p className="text-xs text-forest-600 mb-2">
+                    How we&apos;ll greet you.
+                    {username ? (
+                      <>
+                        {" "}
+                        Login username: <span className="font-medium text-forest-700">@{username}</span>
+                      </>
+                    ) : null}
+                  </p>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className={inputCls}
+                    placeholder="e.g. Jordan"
+                    autoComplete="name"
+                  />
                 </div>
                 <div className={sectionCls}>
-                  <label className={labelCls}>Avatar URL (optional)</label>
-                  <input type="url" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} className={inputCls} placeholder="https://..." />
-                </div>
-                <div className={sectionCls}>
-                  <label className={labelCls}>City</label>
-                  <input type="text" value={city} onChange={(e) => setCity(e.target.value)} className={inputCls} placeholder="City" required />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>State</label>
-                    <input type="text" value={state} onChange={(e) => setState(e.target.value)} className={inputCls} placeholder="State" required />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Postal code</label>
-                    <input type="text" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} className={inputCls} placeholder="ZIP" required />
-                  </div>
-                </div>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Country</label>
-                  <input type="text" value={country} onChange={(e) => setCountry(e.target.value)} className={inputCls} placeholder="US" />
-                </div>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Climate</label>
-                  <CardSelect options={CLIMATE_OPTIONS} value={climate} onChange={(v) => setClimate(v as string)} />
-                </div>
-              </>
-            )}
-
-            {step === 2 && (
-              <>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Light level</label>
-                  <LightCards value={lightLevel} onChange={setLightLevel} />
-                </div>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Humidity level (low / med / high)</label>
-                  <div className="flex flex-wrap gap-2">
-                    {HUMIDITY_OPTIONS.map((opt) => (
+                  <label className={labelCls}>Climate (plant origin category)</label>
+                  <div className="flex flex-col gap-2">
+                    {CLIMATE_OPTIONS.map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => setHumidityLevel(opt.id)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${humidityLevel === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"}`}
+                        onClick={() => setClimate(opt.id)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          climate === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"
+                        }`}
                       >
                         <span className="font-medium text-forest-800">{opt.label}</span>
                         <span className="block text-xs text-forest-600">{opt.desc}</span>
@@ -442,17 +382,84 @@ export default function OnboardingPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelCls}>Min temp °F (optional)</label>
-                    <input type="number" value={tempMinF} onChange={(e) => setTempMinF(e.target.value)} className={inputCls} placeholder="65" />
+                    <label className={labelCls}>USDA zone min (1–13, optional)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={13}
+                      value={usdaZoneMin}
+                      onChange={(e) => setUsdaZoneMin(e.target.value)}
+                      className={inputCls}
+                      placeholder="e.g. 6"
+                    />
                   </div>
                   <div>
-                    <label className={labelCls}>Max temp °F (optional)</label>
-                    <input type="number" value={tempMaxF} onChange={(e) => setTempMaxF(e.target.value)} className={inputCls} placeholder="78" />
+                    <label className={labelCls}>USDA zone max (optional)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={13}
+                      value={usdaZoneMax}
+                      onChange={(e) => setUsdaZoneMax(e.target.value)}
+                      className={inputCls}
+                      placeholder="e.g. 9"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {step === 2 && (
+              <>
+                <div className={sectionCls}>
+                  <label className={labelCls}>Light at your plants</label>
+                  <LightCards value={lightLevel} onChange={setLightLevel} />
+                </div>
+                <div className={sectionCls}>
+                  <label className={labelCls}>Soil you prefer</label>
+                  <div className="flex flex-wrap gap-2">
+                    {SOIL_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setSoilPreference(opt.id)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          soilPreference === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"
+                        }`}
+                      >
+                        <span className="font-medium text-forest-800">{opt.label}</span>
+                        <span className="block text-xs text-forest-600">{opt.desc}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <div className={sectionCls}>
-                  <label className={labelCls}>Do you have kids?</label>
-                  <YesNo value={hasKids} onChange={setHasKids} />
+                  <label className={labelCls}>Growth pace you like</label>
+                  <div className="flex flex-wrap gap-2">
+                    {GROWTH_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setGrowthPref(opt.id)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          growthPref === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"
+                        }`}
+                      >
+                        <span className="font-medium text-forest-800">{opt.label}</span>
+                        <span className="block text-xs text-forest-600">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>Indoor temp min °F (optional)</label>
+                    <input type="number" value={tempMinF} onChange={(e) => setTempMinF(e.target.value)} className={inputCls} placeholder="65" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Indoor temp max °F (optional)</label>
+                    <input type="number" value={tempMaxF} onChange={(e) => setTempMaxF(e.target.value)} className={inputCls} placeholder="78" />
+                  </div>
                 </div>
               </>
             )}
@@ -460,14 +467,16 @@ export default function OnboardingPage() {
             {step === 3 && (
               <>
                 <div className={sectionCls}>
-                  <label className={labelCls}>Care level (matches plant difficulty: easy / medium / hard)</label>
+                  <label className={labelCls}>Care level you want</label>
                   <div className="flex flex-wrap gap-2">
                     {CARE_LEVEL_OPTIONS.map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
                         onClick={() => setCareLevel(opt.id)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${careLevel === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"}`}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          careLevel === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"
+                        }`}
                       >
                         <span className="font-medium text-forest-800">{opt.label}</span>
                         <span className="block text-xs text-forest-600">{opt.desc}</span>
@@ -483,7 +492,9 @@ export default function OnboardingPage() {
                         key={opt.id}
                         type="button"
                         onClick={() => setPreferredSize(opt.id)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${preferredSize === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"}`}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          preferredSize === opt.id ? "border-forest-600 bg-forest-50" : "border-sage-200"
+                        }`}
                       >
                         <span className="font-medium text-forest-800">{opt.label}</span>
                         <span className="block text-xs text-forest-600">{opt.desc}</span>
@@ -492,21 +503,8 @@ export default function OnboardingPage() {
                   </div>
                 </div>
                 <div className={sectionCls}>
-                  <label className={labelCls}>Hard no (optional)</label>
-                  <CardSelect options={HARD_NO_OPTIONS} value={hardNo} onChange={(v) => setHardNo(v as string[])} multi />
-                </div>
-              </>
-            )}
-
-            {step === 4 && (
-              <>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Watering frequency (optional: low / medium / high)</label>
-                  <CardSelect options={[{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }, { id: "high", label: "High" }]} value={wateringFreq} onChange={(v) => setWateringFreq(v as string)} />
-                </div>
-                <div className={sectionCls}>
-                  <label className={labelCls}>Care frequency (optional: low / medium / high)</label>
-                  <CardSelect options={[{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }, { id: "high", label: "High" }]} value={careFreq} onChange={(v) => setCareFreq(v as string)} />
+                  <label className={labelCls}>Watering you can offer (low / medium / high)</label>
+                  <CardSelect options={WATER_OPTIONS} value={wateringFreq} onChange={(v) => setWateringFreq(v)} />
                 </div>
               </>
             )}
@@ -517,7 +515,7 @@ export default function OnboardingPage() {
                   Back
                 </button>
               )}
-              {step < 4 ? (
+              {step < 3 ? (
                 <button type="button" onClick={() => setStep((s) => s + 1)} className="flex-1 py-3 rounded-lg bg-forest-600 text-white font-medium">
                   Next
                 </button>

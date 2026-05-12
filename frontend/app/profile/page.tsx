@@ -4,21 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getProfile, getToken } from "@/lib/api";
 
-type ProfileData = {
+/** Matches GET /profile (two-tower fields only). */
+type TowerProfile = {
   username: string;
-  profile: { name?: string; avatar_url?: string };
-  location: { city?: string; state?: string; postal_code?: string; country?: string };
-  environment: {
-    light_level?: string;
-    humidity_level?: string;
-    temperature_pref?: { min_f?: number; max_f?: number };
+  profile?: { name?: string | null };
+  climate?: string | null;
+  usda_zone_min?: number | null;
+  usda_zone_max?: number | null;
+  environment?: {
+    light_level?: string | null;
+    soil_preference?: string | null;
+    temperature_pref?: { min_f?: number | null; max_f?: number | null };
   };
-  climate?: string;
-  safety: { has_kids?: boolean };
-  constraints: { preferred_size?: string; hard_no?: string[] };
-  preferences: {
-    care_level?: string;
-    care_preferences?: { watering_freq?: string; care_freq?: string };
+  constraints?: { preferred_size?: string | null };
+  preferences?: {
+    care_level?: string | null;
+    growth_pref?: string | null;
+    care_preferences?: { watering_freq?: string | null };
   };
 };
 
@@ -30,7 +32,7 @@ function formatLabel(s: string): string {
 
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [profile, setProfile] = useState<TowerProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export default function ProfilePage() {
       return;
     }
     getProfile()
-      .then((data) => setProfile(data as ProfileData))
+      .then((data) => setProfile(data as TowerProfile))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   }, []);
@@ -76,44 +78,40 @@ export default function ProfilePage() {
     );
   }
 
-  const { profile: p, location, environment, climate, safety, constraints, preferences } = profile!;
+  const environment = profile!.environment;
+  const constraints = profile!.constraints;
+  const preferences = profile!.preferences;
   const tempPref = environment?.temperature_pref;
   const carePref = preferences?.care_preferences;
 
   const sections: { title: string; items: [string, string | undefined | null][] }[] = [
     {
-      title: "Profile",
+      title: "Climate & zones",
       items: [
-        ["Name", p?.name],
-        ["Avatar URL", p?.avatar_url],
-      ],
-    },
-    {
-      title: "Location",
-      items: [
-        ["City", location?.city],
-        ["State", location?.state],
-        ["Postal code", location?.postal_code],
-        ["Country", location?.country],
+        ["Climate", profile!.climate ?? undefined],
+        [
+          "USDA zones",
+          profile!.usda_zone_min != null && profile!.usda_zone_max != null
+            ? `${profile!.usda_zone_min}–${profile!.usda_zone_max}`
+            : undefined,
+        ],
       ],
     },
     {
       title: "Environment",
       items: [
         ["Light level", environment?.light_level ? formatLabel(environment.light_level) : undefined],
-        ["Humidity level", environment?.humidity_level ? formatLabel(environment.humidity_level) : undefined],
-        ["Temp range", tempPref?.min_f != null && tempPref?.max_f != null ? `${tempPref.min_f}–${tempPref.max_f}°F` : undefined],
+        ["Soil preference", environment?.soil_preference ? formatLabel(environment.soil_preference) : undefined],
+        ["Temp range °F", tempPref?.min_f != null && tempPref?.max_f != null ? `${tempPref.min_f}–${tempPref.max_f}` : undefined],
       ],
     },
     {
-      title: "Other",
+      title: "Preferences",
       items: [
-        ["Climate", climate],
-        ["Has kids", safety?.has_kids != null ? (safety.has_kids ? "Yes" : "No") : undefined],
         ["Preferred size", constraints?.preferred_size ? formatLabel(constraints.preferred_size) : undefined],
         ["Care level", preferences?.care_level ? formatLabel(preferences.care_level) : undefined],
-        ["Watering freq", carePref?.watering_freq ? formatLabel(carePref.watering_freq) : undefined],
-        ["Care freq", carePref?.care_freq ? formatLabel(carePref.care_freq) : undefined],
+        ["Growth preference", preferences?.growth_pref ? formatLabel(preferences.growth_pref) : undefined],
+        ["Watering", carePref?.watering_freq ? formatLabel(carePref.watering_freq) : undefined],
       ],
     },
   ];
@@ -122,32 +120,24 @@ export default function ProfilePage() {
     <div className="min-h-screen px-4 py-8 bg-gradient-to-b from-sage-50 to-forest-50">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold text-forest-800">Profile</h1>
+          <div>
+            <h1 className="text-2xl font-semibold text-forest-800">Recommendation profile</h1>
+            <p className="text-sm text-forest-600 mt-1">Fields used for the same user tower as model training.</p>
+          </div>
           <Link
             href="/onboarding"
             className="px-4 py-2 rounded-lg bg-forest-600 text-white text-sm font-medium hover:bg-forest-700 transition-colors"
           >
-            Edit profile
+            Edit
           </Link>
         </div>
 
         <div className="rounded-xl border border-sage-200 bg-white shadow-leaf p-6 space-y-6">
-          <div className="flex items-center gap-4 pb-4 border-b border-sage-200">
-            {p?.avatar_url ? (
-              <img
-                src={p.avatar_url}
-                alt={p?.name || profile!.username}
-                className="h-16 w-16 rounded-full object-cover"
-              />
-            ) : (
-              <div className="h-16 w-16 rounded-full bg-sage-200 flex items-center justify-center text-2xl">
-                🌱
-              </div>
-            )}
-            <div>
-              <p className="font-semibold text-forest-800">{p?.name || "—"}</p>
-              <p className="text-sm text-forest-600">@{profile!.username}</p>
-            </div>
+          <div className="pb-4 border-b border-sage-200">
+            <p className="text-forest-800 font-medium">
+              {profile!.profile?.name?.trim() ? profile!.profile.name.trim() : "—"}
+            </p>
+            <p className="text-sm text-forest-600">@{profile!.username}</p>
           </div>
 
           {sections.map(({ title, items }) => {

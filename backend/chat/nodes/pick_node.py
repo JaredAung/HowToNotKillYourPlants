@@ -43,13 +43,15 @@ def pick_agent(state: State) -> dict:
         garden_coll = get_garden_collection()
         plant_coll = get_plant_collection()
 
-        plant = plant_coll.find_one({"plant_id": plant_id})
-        info = (plant or {}).get("Info", {}) or {}
+        plant = plant_coll.find_one({"plant_id": plant_id}) or {}
+        info = plant.get("info") or {}
         display_name = (
             selected.get("common_name")
             or selected.get("latin")
-            or info.get("latin")
+            or plant.get("name")
+            or plant.get("scientific_name")
             or info.get("common_name")
+            or info.get("latin")
             or f"Plant #{plant_id}"
         )
 

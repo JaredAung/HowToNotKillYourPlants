@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 # Schema version: bump when recommendation output format changes
 CACHE_SCHEMA_VERSION = 1
 
+# Home deck: pool_100 + top_recommended_5 + explore_order_ids (shuffled queue for paging)
+DECK_SCHEMA_VERSION = 4
+
 # Default TTL in seconds (5 min)
 DEFAULT_TTL = int(os.getenv("RECOMMEND_CACHE_TTL", "300"))
 
 KEY_PREFIX = "rec:"
+DECK_KEY_PREFIX = "recdeck:"
 
 
 def _get_redis():
@@ -106,6 +110,85 @@ def set_cached(
         return True
     except Exception as e:
         logger.warning("Redis set failed: %s", e)
+        return False
+
+
+def deck_cache_key(username: str, profile: dict) -> str:
+    """Redis key for the home recommendation deck (pool of 100 + current display)."""
+    return f"{DECK_KEY_PREFIX}{username}:{_profile_hash(profile)}"
+
+
+def _deck_serialize(
+    username: str,
+    pool_100: list,
+    top_recommended_5: list,
+    explore_order_ids: list,
+) -> str:
+    return json.dumps(
+        {
+            "v": DECK_SCHEMA_VERSION,
+            "username": username,
+            "pool_100": pool_100,
+            "top_recommended_5": top_recommended_5,
+            "explore_order_ids": explore_order_ids,
+        },
+        default=str,
+    )
+
+
+def _deck_deserialize(raw: str) -> dict | None:
+    try:
+        data = json.loads(raw)
+        if data.get("v") != DECK_SCHEMA_VERSION:
+            return None
+        return {
+            "username": data.get("username"),
+            "pool_100": data.get("pool_100") or [],
+            "top_recommended_5": data.get("top_recommended_5") or [],
+            "explore_order_ids": data.get("explore_order_ids") or [],
+        }
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def get_deck(username: str, profile: dict) -> dict | None:
+    """Load home deck: ``pool_100``, ``top_recommended_5``, ``explore_order_ids``. Returns None on miss."""
+    client = _get_redis()
+    if not client:
+        return None
+    key = deck_cache_key(username, profile)
+    try:
+        raw = client.get(key)
+        if not raw:
+            return None
+        return _deck_deserialize(raw)
+    except Exception as e:
+        logger.warning("Redis deck get failed: %s", e)
+        return None
+
+
+def set_deck(
+    username: str,
+    profile: dict,
+    pool_100: list,
+    top_recommended_5: list,
+    explore_order_ids: list,
+    ttl: int = DEFAULT_TTL,
+) -> bool:
+    """Persist home deck after cold build or shuffle."""
+    client = _get_redis()
+    if not client:
+        return False
+    key = deck_cache_key(username, profile)
+    try:
+        client.setex(
+            key,
+            ttl,
+            _deck_serialize(username, pool_100, top_recommended_5, explore_order_ids),
+        )
+        return True
+    except Exception as e:
+        logger.warning("Redis deck set failed: %s", e)
         return False
 
 

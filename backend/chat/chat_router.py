@@ -8,30 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth.jwt import get_current_username
 from chat.chat import invoke_chat
 from database import get_user_collection
+from profile.profile import tower_profile_response
 from recommend.recommend import recommend_for_profile
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def _get_user_profile(username: str) -> dict:
-    """Fetch user profile from DB (same shape as GET /profile)."""
+    """Fetch user profile from DB (same shape as GET /profile / two-tower fields)."""
     user_coll = get_user_collection()
     user = user_coll.find_one({"auth.username": username}) or user_coll.find_one(
         {"auth.email": username.lower()}
     )
     if not user:
         return {}
-    auth = user.get("auth", {}) or {}
-    return {
-        "username": auth.get("username") or username,
-        "profile": user.get("profile", {}) or {},
-        "location": user.get("location", {}) or {},
-        "environment": user.get("environment", {}) or {},
-        "climate": user.get("climate"),
-        "safety": user.get("safety", {}) or {},
-        "constraints": user.get("constraints", {}) or {},
-        "preferences": user.get("preferences", {}) or {},
-    }
+    return tower_profile_response(user, username)
 
 
 @router.post("/invoke")

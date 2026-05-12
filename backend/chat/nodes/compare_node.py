@@ -8,8 +8,9 @@ import re
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from chat.agent_tools import retrieve_plant_profile, tavily_search
+from chat.agent_tools import format_tower_profile_for_llm, retrieve_pfaff_plant_knowledge, retrieve_plant_profile
 from chat.chat import State
+from chat.rag_trace import log_rag_retrieval
 from llm import ollama_llm
 
 logger = logging.getLogger(__name__)
@@ -37,38 +38,6 @@ def _last_user_content(messages: list) -> str:
         elif hasattr(m, "type") and getattr(m, "type", "") in ("human", "user"):
             return getattr(m, "content", "") or ""
     return ""
-
-
-def _format_user_profile_for_llm(profile: dict | None) -> str:
-    """Extract limited user profile for personalization."""
-    if not profile:
-        return "(No user profile)"
-    parts = []
-    p = profile.get("profile") or {}
-    if p.get("name"):
-        parts.append(f"  name: {p['name']}")
-    env = profile.get("environment") or {}
-    if env:
-        env_str = ", ".join(f"{k}: {v}" for k, v in env.items() if v is not None and not isinstance(v, dict))
-        if env_str:
-            parts.append(f"  environment: {env_str}")
-        temp = env.get("temperature_pref") or {}
-        if temp and (temp.get("min_f") is not None or temp.get("max_f") is not None):
-            parts.append(f"  temp_pref: {temp.get('min_f')}-{temp.get('max_f')}°F")
-    if profile.get("climate"):
-        parts.append(f"  climate: {profile['climate']}")
-    constraints = profile.get("constraints") or {}
-    if constraints.get("time_commit"):
-        parts.append(f"  time_commit: {constraints['time_commit']}")
-    prefs = profile.get("preferences") or {}
-    if prefs.get("experience_level"):
-        parts.append(f"  experience_level: {prefs['experience_level']}")
-    care_prefs = prefs.get("care_preferences") or {}
-    if care_prefs:
-        care_str = ", ".join(f"{k}: {v}" for k, v in care_prefs.items() if v is not None)
-        if care_str:
-            parts.append(f"  preferences: {care_str}")
-    return "\n".join(parts) if parts else "(No user profile)"
 
 
 def _format_plant_for_display(plant: dict) -> str:
@@ -192,7 +161,7 @@ def _db_search_plant(query: str) -> str | None:
         if result and "No plants found" not in result:
             _debug("DB search result (truncated)", result[:500] + "..." if len(result) > 500 else result)
             return result
-    _debug("DB search", f"query='{query}' -> no match, will use Tavily")
+    _debug("DB search", f"query='{query}' -> no catalog match")
     return None
 
 
@@ -202,7 +171,7 @@ def _resolve_plants_for_compare(
 ) -> list[tuple[str, str]]:
     """
     Resolve each plant ref to (name, formatted_profile).
-    "selected" -> selected_plant. Otherwise: DB first, Tavily fallback.
+    "selected" -> selected_plant. Otherwise: DB catalog only (no web search).
     """
     results = []
     selected = selected_plant or {}
@@ -217,105 +186,78 @@ def _resolve_plants_for_compare(
             name = selected.get("common_name") or selected.get("latin") or f"Plant #{selected.get('plant_id')}"
             results.append((str(name), _format_plant_for_display(selected)))
             continue
-        # By name: DB search first (try query, then word variants), Tavily fallback
+        # By name: DB search only (no web)
         profile_str = _db_search_plant(ref)
         if profile_str:
             name_match = re.search(r"latin:\s*(\S+)", profile_str) or re.search(r"common_name:\s*(.+)", profile_str)
             display_name = name_match.group(1).strip() if name_match else ref
             results.append((display_name, profile_str))
         else:
-            _debug("plant not in DB, fetching via Tavily", ref)
-            tavily_profile = _fetch_plant_info_via_tavily(ref)
-            results.append((ref, tavily_profile))
+            _debug("plant not in catalog", ref)
+            results.append(
+                (
+                    ref,
+                    f"(No catalog entry for '{ref}'. Try another spelling or pick plants from recommendations.)",
+                )
+            )
 
     return results
 
 
-def _eval_missing_info_and_tavily_query_for_compare(
+def _pfaff_excerpts_for_compare(
+    resolved: list[tuple[str, str]],
     user_query: str,
     focus: str | None,
-    plants_text: str,
-    plant_names: list[str],
-) -> str | None:
-    """
-    LLM eval: is the comparison info (especially focus) likely missing from our plant profiles?
-    If yes, return a Tavily search query. Otherwise return None.
-    Query MUST include BOTH plant names for comparison.
-    """
-    names_str = " and ".join(plant_names[:5]) if plant_names else ""
-    eval_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You evaluate whether the user's comparison question can be sufficiently answered from the given plant information.
-
-Plant profiles typically have: care_level, light, water, humidity, temp_min, temp_max, sunlight_type, physical_desc, symbolism, climate. These are SUFFICIENT for: environment, care level, light needs, watering, humidity, temperature, climate, ease of care. Reply NONE for these.
-
-Output a web search query ONLY if the user asks for something typically NOT in profiles:
-- Edibility, toxicity, poisonous, pet-safe
-- Propagation, repotting, pruning, pests, diseases
-- Symbolism, history, cultural info (only if not in profile)
-
-If the focus is environment, care, light, water, humidity, temp, or climate → reply with exactly: NONE (profiles have this).
-
-If a web search would help, reply with a short query (5-12 words). CRITICAL: Include BOTH plant names.
-
-Reply with ONLY "NONE" or the search query, nothing else."""),
-        ("human", "Plants to compare: {plant_names}\n\nUser asked: {user_query}\n\nFocus of comparison: {focus}\n\nPlant profiles:\n{plants_text}"),
-    ])
-    response = (eval_prompt | ollama_llm).invoke({
-        "user_query": user_query,
-        "focus": focus or "(general comparison)",
-        "plants_text": plants_text[:2500],
-        "plant_names": names_str,
-    })
-    raw = (getattr(response, "content", str(response)) or "").strip()
-    if not raw or len(raw) < 5:
-        return None
-    if raw.upper().startswith("NONE") or raw.upper() == "NONE":
-        return None
-    return raw if len(raw) > 8 else None
-
-
-def _format_tavily_results(results: list) -> str:
-    parts = []
-    for i, r in enumerate(results[:5]):
-        if isinstance(r, dict):
-            title = r.get("title", r.get("name", ""))
-            content = r.get("content", r.get("snippet", r.get("raw_content", "")))
-            url = r.get("url", "")
-            content_str = str(content)[:600] + ("..." if len(str(content)) > 600 else "")
-            parts.append(f"[{i + 1}] {title}\n{content_str}\nSource: {url}")
-        else:
-            parts.append(str(r)[:600])
-    return "\n\n".join(parts) if parts else ""
-
-
-def _fetch_tavily(query: str) -> str:
-    try:
-        result = tavily_search.invoke(query)
-        if isinstance(result, str):
-            return result[:3000]
-        if isinstance(result, list):
-            return _format_tavily_results(result)
-        if isinstance(result, dict) and "results" in result:
-            return _format_tavily_results(result["results"])
-        return str(result)[:2000]
-    except Exception as e:
-        logger.warning("Tavily search failed: %s", e)
-        return ""
-
-
-def _fetch_plant_info_via_tavily(plant_name: str) -> str:
-    """
-    Look up plant info via Tavily when not in our DB.
-    Returns formatted profile string for use in comparison.
-    """
-    query = f"{plant_name} houseplant care light water humidity characteristics description"
-    try:
-        raw = _fetch_tavily(query)
-        if raw:
-            return f"(Web-sourced info for {plant_name}):\n{raw}"
-    except Exception as e:
-        logger.warning("Tavily plant lookup failed for %s: %s", plant_name, e)
-    return f"(No data found for '{plant_name}' in database or web search)"
+    *,
+    user_id: str | None = None,
+) -> str:
+    """PFAF RAG snippets per plant when Latin appears in catalog profile text."""
+    qbase = f"{user_query} {focus or ''}".strip()[:500] or "plant comparison"
+    parts: list[str] = []
+    for _name, profile_str in resolved:
+        if "No catalog entry" in profile_str:
+            continue
+        m = re.search(r"latin:\s*(.+)", profile_str, re.I)
+        if not m:
+            continue
+        latin = m.group(1).strip()
+        if not latin:
+            continue
+        try:
+            text = retrieve_pfaff_plant_knowledge(qbase, latin, top_k=3)
+        except Exception as e:
+            logger.warning("PFAF compare snippet failed for %s: %s", latin, e)
+            log_rag_retrieval(
+                phase="COMPARE",
+                user_query=qbase,
+                plant_name=latin,
+                top_k=3,
+                rag_result="",
+                user_id=user_id,
+                extra={"error": str(e)},
+            )
+            continue
+        if not text or "Plant knowledge search is unavailable" in text:
+            log_rag_retrieval(
+                phase="COMPARE",
+                user_query=qbase,
+                plant_name=latin,
+                top_k=3,
+                rag_result=text or "",
+                user_id=user_id,
+                extra={"skipped_empty_or_unavailable": True},
+            )
+            continue
+        log_rag_retrieval(
+            phase="COMPARE",
+            user_query=qbase,
+            plant_name=latin,
+            top_k=3,
+            rag_result=text,
+            user_id=user_id,
+        )
+        parts.append(f"--- {latin} (PFAF / Plants For A Future) ---\n{text}")
+    return "\n\n".join(parts)
 
 
 def compare_agent(state: State) -> dict:
@@ -339,7 +281,7 @@ def compare_agent(state: State) -> dict:
         elif "selected" in [r.strip().lower() for r in plant_refs] and not selected:
             reply = "To compare 'this plant', select one first from your recommendations, or name the plants explicitly (e.g. \"compare monstera and pothos\")."
         else:
-            # 2. Resolve each (selected -> selected_plant; names -> DB + Tavily fallback)
+            # 2. Resolve each (selected -> selected_plant; names -> DB catalog)
             resolved = _resolve_plants_for_compare(plant_refs, selected)
             _debug("resolved count", len(resolved))
 
@@ -353,32 +295,20 @@ def compare_agent(state: State) -> dict:
 
                 plants_text = "\n\n---\n\n".join(plant_sections)
 
-                # 4. Eval: is comparison info missing? If so, run Tavily
-                tavily_results = ""
-                if len(resolved) >= 2:
-                    plant_names = [n for n, _ in resolved]
-                    tavily_query = _eval_missing_info_and_tavily_query_for_compare(
-                        user_content, focus, plants_text, plant_names
+                # 4. PFAF RAG (per Latin name in catalog profiles)
+                pfaff_section = ""
+                if len(resolved) >= 1:
+                    pfaff_section = _pfaff_excerpts_for_compare(
+                        resolved,
+                        user_content,
+                        focus,
+                        user_id=(state.get("user_id") or None),
                     )
-                    # Ensure query includes plant names (fallback if eval returns incomplete query)
-                    if tavily_query and plant_names:
-                        q_lower = tavily_query.lower()
-                        missing = [n for n in plant_names[:5] if n and n.lower() not in q_lower]
-                        if missing:
-                            tavily_query = " ".join(plant_names[:5]) + f" {focus or 'comparison'}"
-                    if tavily_query:
-                        _debug("eval: Tavily query", tavily_query)
-                        try:
-                            tavily_results = _fetch_tavily(tavily_query)
-                            if tavily_results:
-                                tavily_results = f"Web search (use if relevant):\n{tavily_results}"
-                        except Exception:
-                            pass
-                    else:
-                        _debug("eval: no Tavily query (profiles sufficient)")
+                    if pfaff_section:
+                        _debug("PFAF excerpts length", len(pfaff_section))
 
                 # 5. LLM comparison
-                user_profile_str = _format_user_profile_for_llm(state.get("user_profile"))
+                user_profile_str = format_tower_profile_for_llm(state.get("user_profile"))
                 if focus:
                     focus_section = f"Focus ONLY on: {focus}."
                 else:
@@ -392,16 +322,15 @@ def compare_agent(state: State) -> dict:
 
 {focus_section}
 
-Plant info may come from our database or from web search (marked as "Web-sourced"). Use both when available. If web search results are provided, incorporate them into your comparison.
-Only use information that is explicitly mentioned in the plant profiles or web search results. Do not make up information.
+Use catalog plant profiles and any **PFAF / Plants For A Future** excerpts provided (authoritative for cultivation, uses, habitat). Do not invent facts not supported by the given text.
 Write a friendly, structured comparison (2-5 short paragraphs or bullet points). Be concise but informative."""),
-                    ("human", "User profile:\n{user_profile}\n\nUser asked: {user_query}\n\n{plants_text}\n\n{tavily_section}"),
+                    ("human", "User profile:\n{user_profile}\n\nUser asked: {user_query}\n\n{plants_text}\n\n{pfaff_section}"),
                 ])
                 response = (prompt | ollama_llm).invoke({
                     "user_profile": user_profile_str,
                     "user_query": user_content,
                     "plants_text": plants_text,
-                    "tavily_section": tavily_results or "",
+                    "pfaff_section": pfaff_section or "",
                     "focus_section": focus_section,
                 })
                 reply = getattr(response, "content", str(response)) or "I couldn't generate a comparison."

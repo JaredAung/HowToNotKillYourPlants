@@ -2,24 +2,30 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getExplanation, getRecommendations, getToken } from "@/lib/api";
+import {
+  cacheHomeRecommendations,
+  getExplanation,
+  getRecommendations,
+  getRecommendationsExplore,
+  getToken,
+  type RecommendationsResponse,
+} from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { PlantCard, type PlantRec } from "@/app/components/PlantCard";
 import { ExplanationDisplay } from "@/app/components/ExplanationDisplay";
 import { setChatContext } from "@/lib/chatContext";
 import { addDirectlyToGarden } from "@/lib/addToGarden";
 
-type RecResponse = { username?: string; plants?: PlantRec[]; message?: string; explanation?: string };
-
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [recommendations, setRecommendations] = useState<RecResponse | null>(null);
+  const [recommendations, setRecommendations] = useState<RecommendationsResponse | null>(null);
   const [explanationOn, setExplanationOn] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addSuccessPlantId, setAddSuccessPlantId] = useState<number | null>(null);
+  const [loadMoreLoading, setLoadMoreLoading] = useState(false);
 
   const fetchRecs = (forceRefresh = false) => {
     const token = getToken();
@@ -30,7 +36,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     getRecommendations({ forceRefresh })
-      .then((data) => setRecommendations(data as RecResponse))
+      .then((data) => setRecommendations(data))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   };
@@ -50,18 +56,50 @@ export default function Home() {
       setExplanation(null);
       return;
     }
-    const plants = recommendations?.plants ?? [];
-    if (plants.length === 0) return;
+    const top5 = (recommendations?.top_recommended ?? []).slice(0, 5);
+    if (top5.length === 0) {
+      setExplanation(null);
+      setExplanationLoading(false);
+      return;
+    }
     setExplanationLoading(true);
-    const top5Ids = plants.slice(0, 5).map((p) => p.plant_id);
+    const top5Ids = top5.map((p) => p.plant_id);
     getExplanation(top5Ids)
       .then((res) => setExplanation(res.explanation ?? ""))
       .catch(() => setExplanation(""))
       .finally(() => setExplanationLoading(false));
-  }, [explanationOn, recommendations?.plants]);
+  }, [explanationOn, recommendations?.top_recommended]);
 
   const isLoggedIn = !!getToken();
+  const topRecommended = recommendations?.top_recommended ?? [];
   const plants = recommendations?.plants ?? [];
+  const hasRecs = topRecommended.length > 0 || plants.length > 0;
+  const showGridRefresh = plants.length > 0;
+  const showHeaderRefresh = hasRecs && !showGridRefresh;
+  const chatContextPlants: PlantRec[] =
+    topRecommended.length > 0 ? topRecommended.slice(0, 5) : plants.slice(0, 5);
+
+  const exploreHasMore = recommendations?.explore_has_more === true;
+
+  const handleLoadMoreExplore = async () => {
+    if (!recommendations || loadMoreLoading) return;
+    setLoadMoreLoading(true);
+    setError(null);
+    try {
+      const next = await getRecommendationsExplore(plants.length, 20);
+      const merged: RecommendationsResponse = {
+        ...recommendations,
+        plants: [...plants, ...next.plants],
+        explore_has_more: next.has_more,
+      };
+      setRecommendations(merged);
+      cacheHomeRecommendations(merged);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more");
+    } finally {
+      setLoadMoreLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col px-4 py-8 bg-gradient-to-b from-sage-50 to-forest-50">
@@ -90,7 +128,7 @@ export default function Home() {
                     For you, {recommendations.username ?? "you"}
                   </h2>
                   <div className="flex items-center gap-3">
-                    {plants.length > 0 && (
+                    {showHeaderRefresh && (
                     <button
                       type="button"
                       onClick={() => fetchRecs(true)}
@@ -100,7 +138,7 @@ export default function Home() {
                       Refresh
                     </button>
                     )}
-                    {plants.length > 0 && (
+                    {hasRecs && (
                     <label className="flex items-center gap-2 cursor-pointer">
                       <span className="text-sm text-forest-600">Explanation</span>
                       <button
@@ -122,7 +160,7 @@ export default function Home() {
                     )}
                   </div>
                 </div>
-                {plants.length > 0 && explanationOn && (
+                {hasRecs && explanationOn && (
                   <div className="w-full max-w-2xl mx-auto rounded-xl border border-sage-200 bg-white shadow-leaf p-5">
                     <h3 className="text-base font-semibold text-forest-800 mb-3 flex items-center gap-2">
                       <span className="text-lg">🌱</span>
@@ -131,38 +169,99 @@ export default function Home() {
                     <ExplanationDisplay explanation={explanation} loading={explanationLoading} />
                   </div>
                 )}
-                {recommendations.message ? (
+                {recommendations.message && !hasRecs ? (
                   <p className="text-forest-600 text-sm">{recommendations.message}</p>
-                ) : plants.length > 0 ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {plants.map((p) => {
-                      const matchPct =
-                        p.rerank_score != null
-                          ? Math.round(p.rerank_score * 100)
-                          : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
-                      return (
-                        <PlantCard
-                          key={p.plant_id}
-                          p={p}
-                          matchPct={matchPct}
-                          isJustAdded={addSuccessPlantId === p.plant_id}
-                          onAdd={async (plant) => {
-                            try {
-                              setError(null);
-                              await addDirectlyToGarden(plant);
-                              setAddSuccessPlantId(plant.plant_id);
-                            } catch (err) {
-                              setError(err instanceof Error ? err.message : "Failed to add");
-                            }
-                          }}
-                          onTalkToAgent={(plant) => {
-                            setChatContext(plant, plants.slice(0, 5));
-                            router.push("/chat");
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
+                ) : hasRecs ? (
+                  <>
+                    {topRecommended.length > 0 && (
+                      <section className="w-full flex flex-col gap-4">
+                        <h3 className="text-base font-semibold text-forest-800">
+                          Top recommended
+                        </h3>
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                          {topRecommended.map((p) => {
+                            return (
+                              <PlantCard
+                                key={p.plant_id}
+                                p={p}
+                                isJustAdded={addSuccessPlantId === p.plant_id}
+                                onAdd={async (plant) => {
+                                  try {
+                                    setError(null);
+                                    await addDirectlyToGarden(plant);
+                                    setAddSuccessPlantId(plant.plant_id);
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Failed to add");
+                                  }
+                                }}
+                                onTalkToAgent={(plant) => {
+                                  setChatContext(plant, chatContextPlants);
+                                  router.push("/chat");
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+                    {plants.length > 0 && (
+                      <section
+                        className={`w-full flex flex-col gap-4 ${
+                          topRecommended.length > 0 ? "mt-10" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-4 flex-wrap">
+                          <h3 className="text-base font-semibold text-forest-800">
+                            More picks
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => fetchRecs(true)}
+                            disabled={loading}
+                            className="text-sm text-forest-600 hover:text-forest-800 underline disabled:opacity-50 shrink-0"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                          {plants.map((p) => {
+                            return (
+                              <PlantCard
+                                key={p.plant_id}
+                                p={p}
+                                isJustAdded={addSuccessPlantId === p.plant_id}
+                                onAdd={async (plant) => {
+                                  try {
+                                    setError(null);
+                                    await addDirectlyToGarden(plant);
+                                    setAddSuccessPlantId(plant.plant_id);
+                                  } catch (err) {
+                                    setError(err instanceof Error ? err.message : "Failed to add");
+                                  }
+                                }}
+                                onTalkToAgent={(plant) => {
+                                  setChatContext(plant, chatContextPlants);
+                                  router.push("/chat");
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                        {exploreHasMore && (
+                          <div className="flex justify-center pt-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleLoadMoreExplore()}
+                              disabled={loadMoreLoading}
+                              className="px-5 py-2.5 rounded-lg border border-sage-300 bg-white text-sm font-medium text-forest-800 hover:bg-sage-50 disabled:opacity-50"
+                            >
+                              {loadMoreLoading ? "Loading…" : "Load more"}
+                            </button>
+                          </div>
+                        )}
+                      </section>
+                    )}
+                  </>
                 ) : (
                   <p className="text-forest-600 text-sm">
                     Complete your profile to get personalized plant recommendations.

@@ -6,39 +6,9 @@ import { useParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { getPlant } from "@/lib/api";
 import { navigateToAddToGarden } from "@/lib/addToGarden";
+import { normalizePlantDetail, type PlantDetail } from "@/lib/plantDetail";
+import { PlantCatalogTree } from "@/app/components/PlantCatalogTree";
 import type { PlantRec } from "@/app/components/PlantCard";
-
-type PlantDetail = {
-  plant_id: number;
-  img_url?: string;
-  latin?: string;
-  common_name?: string;
-  category?: string;
-  origin?: string;
-  size?: string;
-  growth_rate?: string;
-  physical_desc?: string;
-  symbolism?: string;
-  sunlight_type?: string;
-  ideal_light?: string;
-  tolerated_light?: string;
-  humidity?: string;
-  humidity_req?: string;
-  care_level?: string;
-  water_req?: string;
-  water_req_raw?: string;
-  temp_min?: number;
-  temp_max?: number;
-  climate?: string;
-  soil_type?: string;
-  drainage_level?: string;
-  bugs?: string[];
-  disease?: string[];
-};
-
-function formatLabel(s: string): string {
-  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export default function PlantDetailPage() {
   const params = useParams();
@@ -56,7 +26,14 @@ export default function PlantDetailPage() {
       return;
     }
     getPlant(plantId)
-      .then((data) => setPlant(data as PlantDetail))
+      .then((data) => {
+        const p = normalizePlantDetail(data);
+        if (!p) {
+          setError("Invalid plant data");
+          return;
+        }
+        setPlant(p);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   }, [id, plantId]);
@@ -80,51 +57,11 @@ export default function PlantDetailPage() {
     );
   }
 
-  const tempStr =
-    plant.temp_min != null && plant.temp_max != null
-      ? `${Math.round(plant.temp_min)}–${Math.round(plant.temp_max)}°F`
-      : null;
-
-  const sections: { title: string; items: [string, string | number | string[] | undefined | null][] }[] = [
-    {
-      title: "About",
-      items: [
-        ["Latin name", plant.latin],
-        ["Common name", plant.common_name],
-        ["Category", plant.category ? formatLabel(plant.category) : undefined],
-        ["Origin", plant.origin],
-        ["Size", plant.size ? formatLabel(plant.size) : undefined],
-        ["Growth rate", plant.growth_rate ? formatLabel(plant.growth_rate) : undefined],
-      ],
-    },
-    {
-      title: "Description",
-      items: [
-        ["Physical description", plant.physical_desc],
-        ["Symbolism", plant.symbolism],
-      ],
-    },
-    {
-      title: "Care",
-      items: [
-        ["Sunlight", plant.sunlight_type ?? plant.ideal_light ?? plant.tolerated_light],
-        ["Humidity", plant.humidity_req ?? plant.humidity],
-        ["Watering", plant.water_req_raw ?? plant.water_req],
-        ["Temperature", tempStr ?? undefined],
-        ["Climate", plant.climate],
-        ["Care level", plant.care_level ? formatLabel(plant.care_level) : undefined],
-        ["Soil", plant.soil_type],
-        ["Drainage", plant.drainage_level ? formatLabel(plant.drainage_level) : undefined],
-      ],
-    },
-    {
-      title: "Pests & diseases",
-      items: [
-        ["Bugs", plant.bugs?.length ? plant.bugs.join(", ") : undefined],
-        ["Disease", plant.disease?.length ? plant.disease.join(", ") : undefined],
-      ],
-    },
-  ];
+  const displayName =
+    plant.common_name ??
+    plant.latin ??
+    (typeof plant.catalog?.name === "string" ? plant.catalog.name : null) ??
+    `Plant #${plant.plant_id}`;
 
   return (
     <div className="min-h-screen px-4 py-8 bg-gradient-to-b from-sage-50 to-forest-50">
@@ -153,9 +90,7 @@ export default function PlantDetailPage() {
                 )}
               </div>
               <div className="flex-1">
-                <h1 className="text-2xl font-bold text-forest-800">
-                  {plant.common_name ?? plant.latin ?? `Plant #${plant.plant_id}`}
-                </h1>
+                <h1 className="text-2xl font-bold text-forest-800">{displayName}</h1>
                 {plant.latin && plant.common_name && (
                   <p className="text-forest-600 text-base italic">{plant.latin}</p>
                 )}
@@ -169,25 +104,13 @@ export default function PlantDetailPage() {
               </div>
             </div>
 
-            {sections.map(({ title, items }) => {
-              const filtered = items.filter(([, v]) => v != null && v !== "" && (Array.isArray(v) ? v.length > 0 : true));
-              if (filtered.length === 0) return null;
-              return (
-                <div key={title}>
-                  <h2 className="text-sm font-semibold text-forest-700 mb-3">{title}</h2>
-                  <dl className="space-y-2">
-                    {filtered.map(([label, value]) => (
-                      <div key={label} className="flex flex-col sm:flex-row sm:gap-4">
-                        <dt className="text-forest-600 text-sm shrink-0 sm:w-36">{formatLabel(label)}</dt>
-                        <dd className="text-forest-800 text-sm leading-relaxed">
-                          {Array.isArray(value) ? value.join(", ") : String(value)}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              );
-            })}
+            <div className="rounded-2xl border border-sage-200/80 bg-gradient-to-b from-white to-sage-50/30 p-5 sm:p-6 max-h-[min(70vh,calc(100vh-12rem))] overflow-y-auto shadow-inner">
+              {plant.catalog && Object.keys(plant.catalog).length > 0 ? (
+                <PlantCatalogTree data={plant.catalog} />
+              ) : (
+                <p className="text-sage-500 text-sm">No catalog payload returned.</p>
+              )}
+            </div>
           </div>
         </div>
       </div>

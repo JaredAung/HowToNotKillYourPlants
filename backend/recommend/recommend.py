@@ -13,7 +13,10 @@ Plant recommendation API — scores catalog plants for a user and exposes REST e
 **Layout in this file** — vector helpers → ``recommend_for_profile`` → Cohere helpers → Gemini
 formatting → FastAPI routes.
 """
+import copy
+import json
 import os
+import random
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,21 +24,30 @@ from dotenv import load_dotenv
 # Load environment variables from the repository root (.env).
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 import logging
 
 from auth.jwt import get_current_username # get the logged in user's username
 from database import get_plant_collection, get_user_collection # get the MongoDB collections
-from llm import gemini_generate # generate a natural-language explanation for the plants
-from recommend.cache import get_cached, inspect_cache, set_cached # cache the recommendation results
-from recommend.feature_loader import compute_user_embedding, score_plants # compute the user's embedding and score the plants using the two-tower model
+from llm import ollama_generate  # NL explanation (always Ollama; OLLAMA_MODEL / OLLAMA_HOST)
+from plant.mongo_plant import flatten_catalog_plant_for_api
+from recommend.cache import get_deck, inspect_cache, set_deck
+from recommend.feature_loader import compute_user_embedding, score_plants  # TwoTowerModel user tower (149-d input → 64-d L2)
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
 #CONSTRAINTS AND CONFIGURATIONS
 DEFAULT_TOP_K = 20 # the default number of plants to return from the two-tower model
 RERANK_MODEL = "rerank-v3.5" # the Cohere rerank model to use
+
+# Home page deck (GET /recommend/ when Redis cache is on): retrieve 100, rerank top 20 → top 5 for banner;
+# store pool + shuffled explore_order_ids in Redis; first grid page = ``HOME_DECK_PAGE_K`` plants;
+# GET /recommend/explore pages through the rest (YouTube-style) without rerunning vector/Cohere.
+HOME_DECK_POOL_K = 100
+HOME_DECK_RERANK_K = 20
+HOME_DECK_TOP_K = 5
+HOME_DECK_PAGE_K = 20
 
 VECTOR_INDEX = os.getenv("VECTOR_SEARCH_INDEX", "vector_index") # MongoDB vector search index
 
@@ -53,12 +65,12 @@ def _vector_search_plants(plant_coll, user_emb: list[float], k: int) -> list[dic
 
     Args:
         plant_coll: MongoDB plants collection.
-        user_emb: User embedding vector (same length as plant embeddings; L2-normalized, 1024-dimensional).
+        user_emb: User embedding vector (same length as ``plant_tower_embedding``; L2-normalized, 64-dimensional).
         k: Maximum number of plants to return.
 
     Returns:
-        A list of MongoDB documents. Each document includes ``plant_id``, nested ``Info`` /
-        ``Care``, ``img_url``, and a ``score`` field from the vector search stage.
+        MongoDB documents with ``plant_id``, catalog fields (``info``,
+        ``environment_care``, ``images``, names), and ``score`` from the vector search stage.
 
     Note:
         If this query fails (missing index, Atlas error), the caller falls back to scoring
@@ -77,14 +89,59 @@ def _vector_search_plants(plant_coll, user_emb: list[float], k: int) -> list[dic
         {
             "$project": {
                 "plant_id": 1,
-                "Info": 1,
-                "Care": 1,
-                "img_url": 1,
+                "info": 1,
+                "environment_care": 1,
+                "images": 1,
+                "name": 1,
+                "scientific_name": 1,
+                "description": 1,
+                "care_level": 1,
+                "difficulty_score": 1,
                 "score": {"$meta": "vectorSearchScore"},
             }
         },
     ]
     return list(plant_coll.aggregate(pipeline))
+
+
+def _build_explore_order_ids(pool_flat: list[dict], exclude_ids: set[int]) -> list[int]:
+    """Shuffled plant ids for the explore queue (typically pool minus top picks)."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    for p in pool_flat:
+        pid = p.get("plant_id")
+        if pid is None or pid in exclude_ids or pid in seen:
+            continue
+        ids.append(int(pid))
+        seen.add(int(pid))
+    if not ids:
+        for p in pool_flat:
+            pid = p.get("plant_id")
+            if pid is None or pid in seen:
+                continue
+            ids.append(int(pid))
+            seen.add(int(pid))
+    random.shuffle(ids)
+    return ids
+
+
+def _hydrate_explore_slice(
+    pool_100: list[dict],
+    explore_order_ids: list[int],
+    offset: int,
+    limit: int,
+) -> tuple[list[dict], bool]:
+    """Copy plants from ``pool_100`` by id order; ``has_more`` if more ids remain after this slice."""
+    pool_by_id: dict[int, dict] = {}
+    for p in pool_100:
+        pid = p.get("plant_id")
+        if pid is not None:
+            pool_by_id[int(pid)] = p
+    end = offset + limit
+    slice_ids = explore_order_ids[offset:end]
+    plants = [copy.deepcopy(pool_by_id[i]) for i in slice_ids if i in pool_by_id]
+    has_more = end < len(explore_order_ids)
+    return plants, has_more
 
 
 # =============================================================================
@@ -118,7 +175,7 @@ def recommend_for_profile(
     """
     plant_coll = get_plant_collection()
 
-    # Step A: vector for this profile (loads UserTower weights from feature_loader / two_tower.pt).
+    # Step A: 149-d user features (Feast or Mongo→feature_engineer + garden/death aggregates) → 64-d embedding.
     try:
         user_emb = compute_user_embedding(profile)
     except Exception as e:
@@ -131,10 +188,21 @@ def recommend_for_profile(
     except Exception as e:
         # Fallback: dot-product in app code when Atlas vector search is unavailable.
         logging.warning("MongoDB $vectorSearch failed (%s), falling back to Python scoring", e)
-        all_plants = list(plant_coll.find(
-            {"plant_tower_embedding": {"$exists": True}}, 
-            {"plant_id": 1, "plant_tower_embedding": 1, "Info": 1, "Care": 1, "img_url": 1}
-        ))
+        projection = {
+            "plant_id": 1,
+            "plant_tower_embedding": 1,
+            "info": 1,
+            "environment_care": 1,
+            "images": 1,
+            "name": 1,
+            "scientific_name": 1,
+            "description": 1,
+            "care_level": 1,
+            "difficulty_score": 1,
+        }
+        all_plants = list(
+            plant_coll.find({"plant_tower_embedding": {"$exists": True}}, projection)
+        )
         if not all_plants:
             return {"username": username, "plants": []}
         plant_embs = [(p["plant_id"], p["plant_tower_embedding"]) for p in all_plants]
@@ -149,36 +217,8 @@ def recommend_for_profile(
     if not plants:
         return {"username": username, "plants": []}
 
-    # Step B: flatten nested Mongo ``Info`` / ``Care`` into stable keys for API and rerankers.
-    results = []
-    for p in plants:
-        info = p.get("Info", {}) or {}
-        care = p.get("Care", {}) or {}
-        light_req = care.get("light_req", {}) or {}
-        ideal = light_req.get("ideal_light", {}) or {}
-        tolerated = light_req.get("tolerated_light", {}) or {}
-        temp_req = care.get("temp_req", {}) or {}
-        desc = info.get("desc", {}) or {}
-        results.append({
-            "plant_id": p["plant_id"],
-            "score": round(float(p.get("score", 0)), 4),
-            "img_url": p.get("img_url"),
-            "latin": info.get("latin"),
-            "common_name": info.get("common_name"),
-            "sunlight_type": ideal.get("sunlight_type") or tolerated.get("sunlight_type"),
-            "ideal_light": ideal.get("sunlight_type") or ideal.get("sunlight_bucket"),
-            "tolerated_light": tolerated.get("sunlight_type") or tolerated.get("sunlight_bucket"),
-            "humidity": care.get("humidity_req_bucket") or care.get("humidity_req"),
-            "care_level": care.get("care_level"),
-            "water_req": care.get("water_req_bucket") or care.get("water_req"),
-            "temp_min": temp_req.get("min_temp"),
-            "temp_max": temp_req.get("max_temp"),
-            "climate": care.get("climate"),
-            "size": info.get("size"),
-            "category": info.get("category"),
-            "physical_desc": desc.get("physical_desc"),
-            "symbolism": desc.get("symbolism"),
-        })
+    # Step B: flatten Mongo catalog docs into stable keys for API and rerankers.
+    results = [flatten_catalog_plant_for_api(p) for p in plants]
 
     # Step C: rerank with Cohere 
     if use_rerank is None:
@@ -188,6 +228,108 @@ def recommend_for_profile(
         results = _rerank_with_cohere(query, results, k)
 
     return {"username": username, "plants": results}
+
+
+def _home_deck_cold_build(
+    user: dict, username: str, use_rerank: bool | None
+) -> tuple[dict, list[dict] | None, list[dict] | None, list[int] | None]:
+    """
+    Cold path for the home deck: vector top ``HOME_DECK_POOL_K``, rerank top ``HOME_DECK_RERANK_K``,
+    take top ``HOME_DECK_TOP_K`` for the banner; persist ``pool_100`` and ``explore_order_ids``.
+    """
+    plant_coll = get_plant_collection()
+    pool_k = HOME_DECK_POOL_K
+    rerank_k = HOME_DECK_RERANK_K
+    top_k = HOME_DECK_TOP_K
+
+    try:
+        user_emb = compute_user_embedding(user)
+    except Exception as e:
+        logging.warning("compute_user_embedding failed (home deck): %s", e)
+        return {"username": username, "plants": [], "top_recommended": [], "explore_has_more": False}, None, None, None
+
+    try:
+        plants = _vector_search_plants(plant_coll, user_emb, pool_k)
+    except Exception as e:
+        logging.warning("MongoDB $vectorSearch failed (home deck): %s", e)
+        projection = {
+            "plant_id": 1,
+            "plant_tower_embedding": 1,
+            "info": 1,
+            "environment_care": 1,
+            "images": 1,
+            "name": 1,
+            "scientific_name": 1,
+            "description": 1,
+            "care_level": 1,
+            "difficulty_score": 1,
+        }
+        all_plants = list(
+            plant_coll.find({"plant_tower_embedding": {"$exists": True}}, projection)
+        )
+        if not all_plants:
+            return {"username": username, "plants": [], "top_recommended": [], "explore_has_more": False}, None, None, None
+        plant_embs = [(p["plant_id"], p["plant_tower_embedding"]) for p in all_plants]
+        scored = score_plants(user_emb, plant_embs)[:pool_k]
+        plant_by_id = {p["plant_id"]: p for p in all_plants}
+        plants = []
+        for pid, score in scored:
+            p = plant_by_id.get(pid, {})
+            p["score"] = score
+            plants.append(p)
+
+    if not plants:
+        return {"username": username, "plants": [], "top_recommended": [], "explore_has_more": False}, None, None, None
+
+    results = [flatten_catalog_plant_for_api(p) for p in plants]
+    top_for_rerank = results[:rerank_k]
+
+    if use_rerank is None:
+        use_rerank = os.getenv("USE_RERANK", "true").lower() in ("true", "1", "yes")
+
+    ranked_slice = top_for_rerank
+    if use_rerank and top_for_rerank:
+        query = _user_profile_to_query(user)
+        ranked_slice = _rerank_with_cohere(query, top_for_rerank, rerank_k)
+
+    top_recommended = ranked_slice[:top_k]
+    exclude = {int(p["plant_id"]) for p in top_recommended if p.get("plant_id") is not None}
+    explore_order_ids = _build_explore_order_ids(results, exclude)
+    plants_page, _ = _hydrate_explore_slice(results, explore_order_ids, 0, HOME_DECK_PAGE_K)
+    explore_has_more = len(explore_order_ids) > HOME_DECK_PAGE_K
+    api = {
+        "username": username,
+        "top_recommended": top_recommended,
+        "plants": plants_page,
+        "explore_has_more": explore_has_more,
+    }
+    return api, results, top_recommended, explore_order_ids
+
+
+def _home_deck_shuffle(username: str, profile: dict) -> dict | None:
+    """Reshuffle explore queue; keep reranked top 5. Return None if no deck."""
+    deck = get_deck(username, profile)
+    if not deck:
+        return None
+    pool = deck.get("pool_100") or []
+    top_recommended = deck.get("top_recommended_5") or []
+    if not pool:
+        return {
+            "username": username,
+            "top_recommended": top_recommended,
+            "plants": [],
+            "explore_has_more": False,
+        }
+    exclude = {int(p["plant_id"]) for p in top_recommended if p.get("plant_id") is not None}
+    explore_order_ids = _build_explore_order_ids(pool, exclude)
+    plants_page, _ = _hydrate_explore_slice(pool, explore_order_ids, 0, HOME_DECK_PAGE_K)
+    set_deck(username, profile, pool, top_recommended, explore_order_ids)
+    return {
+        "username": username,
+        "top_recommended": top_recommended,
+        "plants": plants_page,
+        "explore_has_more": len(explore_order_ids) > HOME_DECK_PAGE_K,
+    }
 
 
 # =============================================================================
@@ -222,8 +364,8 @@ def _user_profile_to_query(user: dict) -> str:
     # Hard / soft buckets mirror how we describe constraints to the rerank model.
     if env.get("light_level"):
         hard.append(f"must tolerate light={env['light_level']}")
-    if env.get("humidity_level"):
-        hard.append(f"humidity should match {env['humidity_level']}")
+    if env.get("soil_preference"):
+        soft.append(f"prefer soil={env['soil_preference']}")
     min_f = temp_pref.get("min_f")
     max_f = temp_pref.get("max_f")
     if min_f is not None and max_f is not None:
@@ -234,13 +376,16 @@ def _user_profile_to_query(user: dict) -> str:
 
     if care_pref.get("watering_freq"):
         hard.append(f"watering should match {care_pref['watering_freq']}")
-    if care_pref.get("care_freq"):
-        soft.append(f"prefer care frequency={care_pref['care_freq']}")
     if pref.get("care_level"):
         soft.append(f"prefer care level={pref['care_level']}")
+    if pref.get("growth_pref"):
+        soft.append(f"prefer growth pace={pref['growth_pref']}")
 
     if user.get("climate"):
         soft.append(f"prefer climate={user['climate']}")
+    zmin, zmax = user.get("usda_zone_min"), user.get("usda_zone_max")
+    if zmin is not None and zmax is not None:
+        soft.append(f"hardiness zones {zmin}–{zmax}")
 
     # Optional fields from semantic search or onboarding flows.
     if user.get("physical_desc"):
@@ -302,7 +447,11 @@ def _plant_to_document(p: dict) -> str:
         parts.append(desc)
     if p.get("symbolism"):
         parts.append(f"Symbolism: {p['symbolism']}")
-    return " | ".join(str(x) for x in parts)
+    text = " | ".join(str(x) for x in parts)
+    if not text.strip():
+        pid = p.get("plant_id")
+        text = f"plant_id={pid}" if pid is not None else "plant (no metadata)"
+    return text
 
 
 def _rerank_with_cohere(query: str, results: list[dict], top_n: int) -> list[dict]:
@@ -335,7 +484,9 @@ def _rerank_with_cohere(query: str, results: list[dict], top_n: int) -> list[dic
     co = cohere.ClientV2(api_key=api_key)
 
     # list of flattened plant profiles for the reranker to compare against the user query
-    documents = [_plant_to_document(p) for p in results] 
+    documents = [_plant_to_document(p) for p in results]
+    if not any(d.strip() for d in documents):
+        return results
 
     rerank_resp = co.rerank(
         model=RERANK_MODEL,
@@ -385,7 +536,7 @@ def _format_plant_for_llm(p: dict) -> str:
 def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
     """Generate a multi-plant write-up explaining why the recommendations are good fits for the user.
 
-    The LLM can be Google Gemini (deployed) or Ollama (local/testing).
+    Uses local Ollama only (``OLLAMA_HOST``, ``OLLAMA_MODEL``); LangGraph chat uses Gemini separately.
 
     Args:
         user: Complete user document from Mongo (profile + auth blocks as stored).
@@ -418,9 +569,13 @@ def _generate_explanation(user: dict, top_plants: list[dict]) -> str:
         f"Explain why each plant is a good match for {user_name}. Use the format: • **Name (Latin)**: explanation"
     )
     try:
-        return gemini_generate(system=system, user_message=user_msg)
+        return ollama_generate(system=system, user_message=user_msg)
     except Exception as e:
-        logging.warning("Gemini explanation failed: %s", e)
+        logging.warning(
+            "Ollama explanation failed (%s). Target=%s (ensure `ollama serve` or Ollama.app is running)",
+            e,
+            os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+        )
         return ""
 
 
@@ -434,25 +589,18 @@ def get_recommendations(
     username: str = Depends(get_current_username),
     k: int = DEFAULT_TOP_K,
     use_rerank: bool = True,
+    refresh: bool = Query(
+        False,
+        description="When true, reshuffle the explore queue from the cached pool (no Cohere). Top 5 rerank unchanged.",
+    ),
 ):
     """
-    API endpoint to the recommendation pipeline.
+    API endpoint to the recommendation pipeline (home page).
 
-    - Runs the entire pipeline (Two-Tower + Reranker)  
-    - Returns ranked plant recommendations for the signed-in user.
-    - Recommendations cached in Redis for 1 hour.
-    
-    Args: 
-        username: Resolved from the JWT by FastAPI dependency injection.
-        k: How many plants to return (defaults to ``DEFAULT_TOP_K``).
-        use_rerank: Default to ``True`` but Set ``False`` to skip Cohere (useful in testing/local development).
-
-    Returns:
-        JSON object: ``username``, ``plants`` (list of scored dicts), and optionally ``message``
-        if the catalog has no embedded plants. 
-
-    Raises:
-        HTTPException: 404 if no user matches the JWT identity.
+    When ``USE_REDIS_CACHE`` is enabled, uses a **deck** in Redis: retrieve 100, rerank 20,
+    expose top 5 as ``top_recommended``, and the first page of ``plants`` from the shuffled explore
+    queue. Further plants load via ``GET /recommend/explore``. ``refresh=true`` reshuffles the queue.
+    Without Redis, returns top 5 + next 20 only (no paging).
     """
     user_coll = get_user_collection()
     user = user_coll.find_one({"auth.username": username}) or user_coll.find_one(
@@ -461,22 +609,107 @@ def get_recommendations(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Check if Redis caching is enabled
     use_redis = os.getenv("USE_REDIS_CACHE", "false").lower() in ("true", "1", "yes")
-    if use_redis: 
-        # Try to get cached recommendations from Redis
-        cached = get_cached(username, user, k, use_rerank) 
-        if cached is not None:
-            out = cached
+
+    if use_redis:
+        if refresh:
+            out = _home_deck_shuffle(username, user)
+            if out is None:
+                out, pool, top_5, eids = _home_deck_cold_build(user, username, use_rerank)
+                if pool is not None and top_5 is not None and eids is not None:
+                    set_deck(username, user, pool, top_5, eids)
         else:
-            # If no cached recommendations, run the pipeline and cache the results
-            out = recommend_for_profile(user, username, k, use_rerank=use_rerank)
-            set_cached(username, user, out, k, use_rerank)
+            deck = get_deck(username, user)
+            tr = list(deck.get("top_recommended_5") or []) if deck else []
+            pool = deck.get("pool_100") or [] if deck else []
+            eids = deck.get("explore_order_ids") or [] if deck else []
+            if deck and len(tr) > 0 and pool:
+                plants_page, _ = _hydrate_explore_slice(pool, eids, 0, HOME_DECK_PAGE_K)
+                out = {
+                    "username": username,
+                    "top_recommended": tr,
+                    "plants": plants_page,
+                    "explore_has_more": len(eids) > HOME_DECK_PAGE_K,
+                }
+            else:
+                out, pool, top_5, eids = _home_deck_cold_build(user, username, use_rerank)
+                if pool is not None and top_5 is not None and eids is not None:
+                    set_deck(username, user, pool, top_5, eids)
     else:
-        out = recommend_for_profile(user, username, k, use_rerank=use_rerank)
-    if not out["plants"]: # if no plants are found, return a message
+        out = recommend_for_profile(user, username, 25, use_rerank=use_rerank)
+        all_p = out.get("plants") or []
+        out["top_recommended"] = all_p[:5]
+        out["plants"] = all_p[5:25]
+        out["explore_has_more"] = False
+    if not (out.get("plants") or out.get("top_recommended")):
         out["message"] = "No plants with embeddings in database."
+    # Debug: exact payload fields the client receives (esp. img_url for images).
+    if os.getenv("DEBUG_RECOMMEND_RESPONSE", "").lower() in ("1", "true", "yes"):
+        def _preview(plist):
+            return [
+                {
+                    "plant_id": p.get("plant_id"),
+                    "img_url": p.get("img_url"),
+                    "common_name": p.get("common_name"),
+                    "latin": p.get("latin"),
+                    "score": p.get("score"),
+                    "rerank_score": p.get("rerank_score"),
+                }
+                for p in plist
+            ]
+
+        logging.info(
+            "GET /recommend/ → user=%s top=%d grid=%d JSON=%s",
+            username,
+            len(out.get("top_recommended") or []),
+            len(out.get("plants") or []),
+            json.dumps(
+                {
+                    "username": out.get("username"),
+                    "top_recommended": _preview(out.get("top_recommended") or []),
+                    "plants": _preview(out.get("plants") or []),
+                    "message": out.get("message"),
+                },
+                default=str,
+            ),
+        )
     return out
+
+
+@router.get("/explore")
+def get_recommend_explore(
+    username: str = Depends(get_current_username),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Index into the shuffled explore queue. First page is on GET /recommend/; use 20, 40, … for more.",
+    ),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Next slice of explore plants from the cached deck (cheap; no vector search or Cohere)."""
+    user_coll = get_user_collection()
+    user = user_coll.find_one({"auth.username": username}) or user_coll.find_one(
+        {"auth.email": username.lower()}
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    use_redis = os.getenv("USE_REDIS_CACHE", "false").lower() in ("true", "1", "yes")
+    if not use_redis:
+        return {"plants": [], "has_more": False}
+
+    deck = get_deck(username, user)
+    if not deck:
+        raise HTTPException(
+            status_code=404,
+            detail="No recommendation deck; load GET /recommend/ first.",
+        )
+
+    pool = deck.get("pool_100") or []
+    explore_order_ids = deck.get("explore_order_ids") or []
+    plants, has_more = _hydrate_explore_slice(pool, explore_order_ids, offset, limit)
+    return {"plants": plants, "has_more": has_more}
+
 
 @router.get("/explanation")
 def get_explanation(
@@ -517,7 +750,21 @@ def get_explanation(
     if not pids:
         return {"explanation": ""}
 
-    plants = list(plant_coll.find({"plant_id": {"$in": pids}}, {"plant_id": 1, "Info": 1, "Care": 1}))
+    plants = list(
+        plant_coll.find(
+            {"plant_id": {"$in": pids}},
+            {
+                "plant_id": 1,
+                "info": 1,
+                "environment_care": 1,
+                "images": 1,
+                "name": 1,
+                "scientific_name": 1,
+                "description": 1,
+                "care_level": 1,
+            },
+        )
+    )
     plant_by_id = {p["plant_id"]: p for p in plants}
 
     top_plants = []
@@ -525,23 +772,8 @@ def get_explanation(
         p = plant_by_id.get(pid, {})
         if not p:
             continue
-        info = p.get("Info", {}) or {}
-        care = p.get("Care", {}) or {}
-        light_req = care.get("light_req", {}) or {}
-        ideal = light_req.get("ideal_light", {}) or {}
-        tolerated = light_req.get("tolerated_light", {}) or {}
-        temp_req = care.get("temp_req", {}) or {}
-        top_plants.append({
-            "plant_id": pid,
-            "latin": info.get("latin"),
-            "common_name": info.get("common_name"),
-            "sunlight_type": ideal.get("sunlight_type") or tolerated.get("sunlight_type"),
-            "humidity": care.get("humidity_req_bucket") or care.get("humidity_req"),
-            "care_level": care.get("care_level"),
-            "water_req": care.get("water_req_bucket") or care.get("water_req"),
-            "temp_min": temp_req.get("min_temp"),
-            "temp_max": temp_req.get("max_temp"),
-        })
+        row = flatten_catalog_plant_for_api({**p, "plant_id": pid, "score": 0})
+        top_plants.append(row)
 
     explanation = _generate_explanation(user, top_plants)
     return {"explanation": explanation}

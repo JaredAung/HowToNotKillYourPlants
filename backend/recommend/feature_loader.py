@@ -1,38 +1,84 @@
 """
-User feature normalization and two-tower inference.
-Same vocabs and encoding as resources/two_tower_training/two_tower_training.py.
-Converts MongoDB user profile -> user embedding for scoring against plant_tower_embedding.
+Two-tower inference aligned with ``resources/two_tower_training/two_tower_model.py`` and
+``training_script.py``.
+
+User tower input is **149-d**: 21-d ``categorical_embedding`` (Feast ``user_features`` when
+``feast_user_id`` is set, otherwise derived from the Mongo profile via
+``resources/ETL/feature_engineer.apply_user_embeddings``), plus **64-d** mean pooled
+``plant_tower_embedding`` for plants currently in the user's garden (grown) and **64-d** for plants
+in recent death records (killed)—matching training aggregates built from interaction labels.
+
+Plant vectors in MongoDB must come from the same ``PlantTower`` / checkpoint as this model.
 """
+from __future__ import annotations
+
+import os
+import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
-# Vocabs (must match training exactly)
-LIGHT_VOCAB = ["direct", "bright_light", "bright_indirect", "indirect", "diffused"]
-HUMIDITY_VOCAB = ["low", "medium", "high"]
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from resources.ETL.feature_engineer import apply_user_embeddings  # noqa: E402
+from resources.two_tower_training.two_tower_model import (  # noqa: E402
+    OUTPUT_DIM,
+    TAU,
+    TwoTowerModel,
+    create_two_tower_model,
+    load_features_from_feast,
+)
+
+# --- Profile normalization (API / search reuse) ---------------------------------
+
+# Matches ``resources/ETL/feature_engineer.ORDINAL_ORDERS["light"]`` / ``vocabs.json`` ``light``.
+LIGHT_VOCAB = ["full shade", "partial sun/shade", "full sun"]
 CARE_LEVEL_VOCAB = ["easy", "medium", "hard"]
 SIZE_VOCAB = ["small", "medium", "large"]
-CLIMATE_VOCAB = ["Arid Tropical", "Subtropical", "Subtropical arid", "Tropical", "Tropical humid"]
+# Same tokens as ``resources/ETL/vocabs.json`` ``origin_climate`` (two-tower climate embedding).
+CLIMATE_VOCAB = ["alpine", "arid", "mediterranean", "temperate", "tropical"]
+SOIL_VOCAB = ["light", "medium", "heavy"]
+GROWTH_VOCAB = ["slow", "med", "fast"]
 WATER_VOCAB = ["low", "medium", "high"]
 
-# Normalize common variants from frontend/API to canonical vocab
 VALUE_NORM: dict[str, dict[str, str]] = {
     "light": {
-        "bright light": "bright_light", "bright_light": "bright_light",
-        "bright indirect": "bright_indirect", "bright_indirect": "bright_indirect",
-        "direct": "direct", "indirect": "indirect", "diffused": "diffused",
+        # Canonical (two-tower / plant ordinal scale)
+        "full shade": "full shade",
+        "partial sun/shade": "partial sun/shade",
+        "full sun": "full sun",
+        "partial shade": "partial sun/shade",
+        "partial sun": "partial sun/shade",
+        # Legacy onboarding / search UI (map into same three ordinals)
+        "direct": "full sun",
+        "bright_light": "full sun",
+        "bright light": "full sun",
+        "bright_indirect": "partial sun/shade",
+        "bright indirect": "partial sun/shade",
+        "indirect": "partial sun/shade",
+        "diffused": "full shade",
     },
-    "humidity": {"low": "low", "medium": "medium", "high": "high", "moderate": "medium"},
     "care": {"easy": "easy", "medium": "medium", "hard": "hard", "moderate": "medium"},
     "size": {"small": "small", "medium": "medium", "large": "large"},
+    # Canonical values match ``vocabs.json`` origin_climate (+ backward compat for old UI).
     "climate": {
-        "arid tropical": "Arid Tropical", "subtropical": "Subtropical",
-        "subtropical arid": "Subtropical arid", "tropical": "Tropical",
-        "tropical humid": "Tropical humid",
+        "alpine": "alpine",
+        "arid": "arid",
+        "mediterranean": "mediterranean",
+        "temperate": "temperate",
+        "tropical": "tropical",
+        "arid tropical": "arid",
+        "subtropical": "temperate",
+        "subtropical arid": "arid",
+        "tropical humid": "tropical",
     },
+    "soil": {"light": "light", "medium": "medium", "heavy": "heavy"},
+    "growth": {"slow": "slow", "med": "med", "medium": "med", "fast": "fast"},
     "water": {"low": "low", "medium": "medium", "high": "high", "moderate": "medium"},
 }
 
@@ -46,26 +92,13 @@ def _normalize(val: str | None, key: str) -> str | None:
     for k, canonical in norm_map.items():
         if k.lower().replace(" ", "_") == v_lower:
             return canonical
-    # Pass through if already valid
     return v
 
 
-def vocab_to_idx(vocab: list[str]) -> dict:
-    return {v: i + 1 for i, v in enumerate(vocab)}  # 0 = padding/unknown
-
-
-def encode_cat(val: str | None, vocab: dict) -> int:
-    if val is None:
-        return 0
-    return vocab.get(val, 0)
-
-
 def normalize_profile(profile: dict) -> dict:
-    """
-    Normalize structured string fields in profile to canonical vocab.
-    Returns a new dict with normalized values. In-place for nested dicts.
-    """
+    """Normalize structured string fields to canonical vocab (Mongo onboarding ↔ training)."""
     import copy
+
     result = copy.deepcopy(profile)
     env = result.get("environment") or {}
     pref = result.get("preferences") or {}
@@ -76,10 +109,6 @@ def normalize_profile(profile: dict) -> dict:
         n = _normalize(env["light_level"], "light")
         if n:
             env["light_level"] = n
-    if env.get("humidity_level"):
-        n = _normalize(env["humidity_level"], "humidity")
-        if n:
-            env["humidity_level"] = n
     if pref.get("care_level"):
         n = _normalize(pref["care_level"], "care")
         if n:
@@ -88,6 +117,10 @@ def normalize_profile(profile: dict) -> dict:
         n = _normalize(constraints["preferred_size"], "size")
         if n:
             constraints["preferred_size"] = n
+    if env.get("soil_preference"):
+        n = _normalize(env["soil_preference"], "soil")
+        if n:
+            env["soil_preference"] = n
     if result.get("climate"):
         n = _normalize(result["climate"], "climate")
         if n:
@@ -96,10 +129,10 @@ def normalize_profile(profile: dict) -> dict:
         n = _normalize(care_pref["watering_freq"], "water")
         if n:
             care_pref["watering_freq"] = n
-    if care_pref.get("care_freq"):
-        n = _normalize(care_pref["care_freq"], "water")
+    if pref.get("growth_pref"):
+        n = _normalize(pref["growth_pref"], "growth")
         if n:
-            care_pref["care_freq"] = n
+            pref["growth_pref"] = n
 
     pref["care_preferences"] = care_pref
     result["environment"] = env
@@ -108,203 +141,247 @@ def normalize_profile(profile: dict) -> dict:
     return result
 
 
-def temp_features(min_f: float | None, max_f: float | None) -> tuple[float, float]:
-    """Return (midpoint, width) normalized. Use 0,0 for missing. Same as training."""
-    if min_f is None or max_f is None or max_f <= min_f:
-        return 0.0, 0.0
-    mid = (min_f + max_f) / 2
-    width = max_f - min_f
-    mid_norm = (mid - 50) / 40
-    width_norm = width / 40
-    return mid_norm, width_norm
+# Mongo watering_freq low/medium/high → days-between-watering for user tower water norms
+_WATER_BUCKET_TO_DAYS = {"low": 7.0, "medium": 2.0, "high": 1.0}
 
 
-USER_VOCABS = {
-    "light": vocab_to_idx(LIGHT_VOCAB),
-    "humidity": vocab_to_idx(HUMIDITY_VOCAB),
-    "care_level": vocab_to_idx(CARE_LEVEL_VOCAB),
-    "size": vocab_to_idx(SIZE_VOCAB),
-    "climate": vocab_to_idx(CLIMATE_VOCAB),
-    "watering": vocab_to_idx(WATER_VOCAB),
-    "care_freq": vocab_to_idx(WATER_VOCAB),
-}
+def _temp_mid_to_bucket(mid_f: float | None) -> str | None:
+    if mid_f is None:
+        return None
+    if mid_f < 55:
+        return "cold"
+    if mid_f < 65:
+        return "cool"
+    if mid_f < 75:
+        return "warm"
+    return "hot"
 
 
-def user_profile_to_features(user: dict) -> tuple[list[int], list[float]]:
-    """
-    Convert MongoDB user document to (u_cat, u_num) for UserTower.
-    user: doc from UserCollection (auth, profile, environment, preferences, constraints, climate)
-    Returns: (u_cat as list of 7 ints, u_num as list of 2 floats)
-    """
-    env = user.get("environment", {}) or {}
-    pref = user.get("preferences", {}) or {}
-    care_pref = pref.get("care_preferences", {}) or {}
-    constraints = user.get("constraints", {}) or {}
-    temp = env.get("temperature_pref", {}) or {}
-
-    light = _normalize(env.get("light_level"), "light") or env.get("light_level")
-    humidity = _normalize(env.get("humidity_level"), "humidity") or env.get("humidity_level")
-    care = _normalize(pref.get("care_level"), "care") or pref.get("care_level")
-    size = _normalize(constraints.get("preferred_size"), "size") or constraints.get("preferred_size")
-    climate_raw = user.get("climate")
-    climate = _normalize(climate_raw, "climate") if climate_raw else climate_raw
-    water = _normalize(care_pref.get("watering_freq"), "water") or care_pref.get("watering_freq")
-    care_freq = _normalize(care_pref.get("care_freq"), "water") or care_pref.get("care_freq")
-
-    u_cat = [
-        encode_cat(light, USER_VOCABS["light"]),
-        encode_cat(humidity, USER_VOCABS["humidity"]),
-        encode_cat(care, USER_VOCABS["care_level"]),
-        encode_cat(size, USER_VOCABS["size"]),
-        encode_cat(climate, USER_VOCABS["climate"]),
-        encode_cat(water, USER_VOCABS["watering"]),
-        encode_cat(care_freq, USER_VOCABS["care_freq"]),
-    ]
-    min_f = temp.get("min_f")
-    max_f = temp.get("max_f")
-    if min_f is not None:
-        min_f = float(min_f)
-    if max_f is not None:
-        max_f = float(max_f)
-    u_temp_mid, u_temp_width = temp_features(min_f, max_f)
-    u_num = [u_temp_mid, u_temp_width]
-    return u_cat, u_num
+def _username_from_user_doc(user: dict) -> str | None:
+    auth = user.get("auth") or {}
+    u = (auth.get("username") or auth.get("email") or "").strip()
+    return u or None
 
 
-# Model path and constants (must match training)
-MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "two_tower_training" / "output" / "two_tower.pt"
-TAU = 0.1  # temperature (must match training)
-EMBED_DIM = 8
-HIDDEN_DIM = 128
-OUTPUT_DIM = 64
-DROPOUT = 0.2
+def _mongo_user_to_flat_fe_dict(user: dict) -> dict:
+    """Flatten normalized Mongo user doc for ``apply_user_embeddings``."""
+    env = user.get("environment") or {}
+    pref = user.get("preferences") or {}
+    care_pref = pref.get("care_preferences") or {}
+    constraints = user.get("constraints") or {}
+    temp_pref = env.get("temperature_pref") or {}
+
+    min_f = temp_pref.get("min_f")
+    max_f = temp_pref.get("max_f")
+    mid = None
+    if min_f is not None and max_f is not None:
+        mid = (float(min_f) + float(max_f)) / 2.0
+
+    light_raw = env.get("light_level")
+    light_mapped = None
+    if light_raw and str(light_raw).strip():
+        n = _normalize(str(light_raw).strip(), "light")
+        if n in ("full shade", "partial sun/shade", "full sun"):
+            light_mapped = n
+
+    wf = care_pref.get("watering_freq")
+    wf_key = str(wf).strip().lower() if wf else ""
+    water_days = _WATER_BUCKET_TO_DAYS.get(wf_key)
+
+    soil_raw = env.get("soil_preference")
+    soil_key = str(soil_raw).strip().lower() if soil_raw else ""
+    soil_mapped = soil_key if soil_key in ("light", "medium", "heavy") else None
+
+    return {
+        "climate": user.get("climate"),
+        "light": light_mapped,
+        "soil": soil_mapped,
+        "size": constraints.get("preferred_size"),
+        "growth_pref": pref.get("growth_pref"),
+        "temp": _temp_mid_to_bucket(mid),
+        "care_level": pref.get("care_level"),
+        "water_freq": water_days,
+        "usda_zone_min": user.get("usda_zone_min"),
+        "usda_zone_max": user.get("usda_zone_max"),
+    }
 
 
-class UserTower(nn.Module):
-    """Must match training UserTower exactly."""
-    def __init__(self):
-        super().__init__()
-        self.embed_light = nn.Embedding(len(LIGHT_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_hum = nn.Embedding(len(HUMIDITY_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_care = nn.Embedding(len(CARE_LEVEL_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_size = nn.Embedding(len(SIZE_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_climate = nn.Embedding(len(CLIMATE_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_water = nn.Embedding(len(WATER_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        self.embed_care_freq = nn.Embedding(len(WATER_VOCAB) + 1, EMBED_DIM, padding_idx=0)
-        cat_dim = 7 * EMBED_DIM
-        in_dim = cat_dim + 2
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, HIDDEN_DIM),
-            nn.ReLU(),
-            nn.Dropout(DROPOUT),
-            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
-            nn.ReLU(),
-            nn.Dropout(DROPOUT),
-            nn.Linear(HIDDEN_DIM, OUTPUT_DIM),
+def _twenty_one_d_from_feast_or_mongo(user_doc: dict) -> list[float]:
+    """21-d categorical_embedding: Feast row when configured, else feature_engineer on Mongo."""
+    feast_uid = user_doc.get("feast_user_id")
+    if feast_uid is None:
+        training = user_doc.get("training") or {}
+        if isinstance(training, dict) and training.get("user_id") is not None:
+            feast_uid = training["user_id"]
+
+    repo_env = os.getenv("FEAST_REPO_PATH", "").strip()
+    repo_path = Path(repo_env).expanduser() if repo_env else None
+
+    if feast_uid is not None:
+        try:
+            uid_int = int(feast_uid)
+            user_by_id, _ = load_features_from_feast([uid_int], [], repo_path=repo_path)
+            row = user_by_id.get(uid_int, {})
+            cat = row.get("categorical_embedding")
+            if cat and len(cat) == 21:
+                return [float(x) for x in cat]
+        except Exception:
+            pass
+
+    normalized = normalize_profile(user_doc)
+    flat = _mongo_user_to_flat_fe_dict(normalized)
+    embedded = apply_user_embeddings([flat])
+    cat = embedded[0].get("categorical_embedding") if embedded else None
+    if cat and len(cat) == 21:
+        return [float(x) for x in cat]
+    return [0.0] * 21
+
+
+def _mean_pool_embeddings(plant_coll, plant_ids: list[int]) -> list[float]:
+    """Mean ``plant_tower_embedding`` (64-d) for distinct plant_ids."""
+    zero = [0.0] * OUTPUT_DIM
+    if not plant_ids:
+        return zero
+    uniq = sorted(set(int(x) for x in plant_ids))
+    docs = list(
+        plant_coll.find(
+            {"plant_id": {"$in": uniq}},
+            {"plant_id": 1, "plant_tower_embedding": 1},
         )
-
-    def forward(self, u_cat: torch.Tensor, u_num: torch.Tensor) -> torch.Tensor:
-        e_light = self.embed_light(u_cat[:, 0])
-        e_hum = self.embed_hum(u_cat[:, 1])
-        e_care = self.embed_care(u_cat[:, 2])
-        e_size = self.embed_size(u_cat[:, 3])
-        e_climate = self.embed_climate(u_cat[:, 4])
-        e_water = self.embed_water(u_cat[:, 5])
-        e_care_freq = self.embed_care_freq(u_cat[:, 6])
-        cat = torch.cat([e_light, e_hum, e_care, e_size, e_climate, e_water, e_care_freq], dim=1)
-        x = torch.cat([cat, u_num], dim=1)
-        return self.mlp(x)
+    )
+    embs: list[list[float]] = []
+    for p in docs:
+        emb = p.get("plant_tower_embedding")
+        if emb and len(emb) == OUTPUT_DIM:
+            embs.append([float(emb[i]) for i in range(OUTPUT_DIM)])
+    if not embs:
+        return zero
+    n = len(embs)
+    return [sum(e[i] for e in embs) / n for i in range(OUTPUT_DIM)]
 
 
-_user_tower: UserTower | None = None
+def _grown_killed_aggregate_embeddings(username: str | None) -> tuple[list[float], list[float]]:
+    """Mirror training aggregate dims using Mongo garden + deaths + catalog embeddings."""
+    zero = [0.0] * OUTPUT_DIM
+    if not username:
+        return zero, zero
+
+    from database import get_death_collection, get_garden_collection, get_plant_collection
+
+    garden_coll = get_garden_collection()
+    death_coll = get_death_collection()
+    plant_coll = get_plant_collection()
+
+    grown_ids = [d["plant_id"] for d in garden_coll.find({"username": username}, {"plant_id": 1})]
+    killed_ids = [d["plant_id"] for d in death_coll.find({"username": username}, {"plant_id": 1})]
+
+    return _mean_pool_embeddings(plant_coll, grown_ids), _mean_pool_embeddings(plant_coll, killed_ids)
 
 
-def _unwrap_checkpoint_dict(raw: Any) -> dict[str, Any]:
-    """Handle checkpoints saved as ``{state_dict: ...}`` or similar wrappers."""
+def build_user_input_vector(user_doc: dict) -> torch.Tensor:
+    """Shape ``(1, 149)`` float tensor for ``TwoTowerModel.user_tower``."""
+    cat21 = _twenty_one_d_from_feast_or_mongo(user_doc)
+    uname = _username_from_user_doc(user_doc)
+    grown64, killed64 = _grown_killed_aggregate_embeddings(uname)
+    vec = cat21 + grown64 + killed64
+    if len(vec) != 149:
+        raise RuntimeError(f"Expected 149-d user input, got {len(vec)}")
+    return torch.tensor([vec], dtype=torch.float32)
+
+
+# --- Checkpoint & model -----------------------------------------------------------
+
+_model: TwoTowerModel | None = None
+
+
+def get_two_tower_checkpoint_path() -> Path:
+    """Resolve ``two_tower.pt``: ``TWO_TOWER_MODEL_PATH``, then standard repo paths."""
+    env = os.getenv("TWO_TOWER_MODEL_PATH", "").strip()
+    candidates: list[Path] = []
+    if env:
+        candidates.append(Path(env).expanduser())
+    candidates.extend(
+        [
+            _ROOT / "resources" / "two_tower_training" / "two_tower.pt",
+            _ROOT / "resources" / "two_tower_training" / "output" / "two_tower.pt",
+        ]
+    )
+    for p in candidates:
+        if p.is_file():
+            return p.resolve()
+    return (_ROOT / "resources" / "two_tower_training" / "two_tower.pt").resolve()
+
+
+def _unwrap_checkpoint_state(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise TypeError(f"Expected dict checkpoint, got {type(raw).__name__}")
-    for key in ("state_dict", "model_state_dict", "model_state", "model"):
+    inner = raw.get("model_state")
+    if isinstance(inner, dict) and inner:
+        return inner
+    for key in ("state_dict", "model_state_dict"):
         inner = raw.get(key)
-        if not isinstance(inner, dict) or not inner:
-            continue
-        if any(
-            isinstance(k, str) and ("user_tower" in k or "plant_tower" in k or "embed_light" in k)
-            for k in inner
+        if isinstance(inner, dict) and inner and any(
+            isinstance(k, str) and k.startswith("user_tower.") for k in inner
         ):
             return inner
     return raw
 
 
-def _extract_user_tower_state(flat: dict[str, Any]) -> dict[str, Any]:
-    """Strip common prefixes from full two-tower checkpoints (``user_tower.``, ``module.user_tower.``, …)."""
-    prefixes = ("user_tower.", "module.user_tower.", "model.user_tower.")
-    for prefix in prefixes:
-        out = {
-            k[len(prefix) :]: v
-            for k, v in flat.items()
-            if isinstance(k, str) and k.startswith(prefix)
-        }
-        if out:
-            return out
-    return {}
+def get_two_tower_model() -> TwoTowerModel:
+    """Lazy-load ``TwoTowerModel`` weights from checkpoint."""
+    global _model
+    if _model is None:
+        ckpt_path = get_two_tower_checkpoint_path()
+        if not ckpt_path.is_file():
+            raise FileNotFoundError(
+                f"Two-tower checkpoint not found at {ckpt_path}. "
+                "Train with resources/two_tower_training/training_script.py or set TWO_TOWER_MODEL_PATH."
+            )
+        raw = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        state = _unwrap_checkpoint_state(raw)
+        model = create_two_tower_model()
+        try:
+            model.load_state_dict(state, strict=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load TwoTowerModel from {ckpt_path}: {e}. "
+                "Checkpoint must match two_tower_model.TwoTowerModel (user_tower + plant_tower MLPs)."
+            ) from e
+        model.eval()
+        _model = model
+    return _model
 
 
-def get_user_tower() -> UserTower:
-    """Lazy-load UserTower from checkpoint."""
-    global _user_tower
-    if _user_tower is None:
-        tower = UserTower()
-        if MODEL_PATH.exists():
-            state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-            flat = _unwrap_checkpoint_dict(state)
-            user_state = _extract_user_tower_state(flat)
-            if not user_state:
-                sample_keys = [k for k in flat.keys() if isinstance(k, str)][:12]
-                raise RuntimeError(
-                    f"No user_tower weights in {MODEL_PATH}. "
-                    f"Expected keys like 'user_tower.embed_light.weight'. "
-                    f"First keys in file: {sample_keys!r}. "
-                    f"Re-run training and save two_tower.pt, or run: "
-                    f"python -m backend.recommend.retrain.retrain_two_tower"
-                )
-            try:
-                tower.load_state_dict(user_state, strict=True)
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to load user_tower from {MODEL_PATH}: {e}. "
-                    "Checkpoint may be incomplete or from a different model architecture; "
-                    "retrain and save a full two_tower.pt."
-                ) from e
-        tower.eval()
-        _user_tower = tower
-    return _user_tower
-
-
-def compute_user_embedding(user: dict) -> list[float]:
+def compute_user_embedding(user_doc: dict) -> list[float]:
     """
-    Compute L2-normalized user embedding from MongoDB user doc.
-    Returns 64-d list for dot product with plant_tower_embedding.
+    L2-normalized **64-d** user embedding for Mongo ``$vectorSearch`` against ``plant_tower_embedding``.
     """
-    u_cat, u_num = user_profile_to_features(user)
-    u_cat_t = torch.tensor([u_cat], dtype=torch.long)
-    u_num_t = torch.tensor([u_num], dtype=torch.float32)
+    x = build_user_input_vector(user_doc)
+    model = get_two_tower_model()
     with torch.no_grad():
-        emb = get_user_tower()(u_cat_t, u_num_t)
-        emb = F.normalize(emb, dim=1)
+        emb = model.encode_user(x)
     return emb[0].tolist()
 
 
-def score_plants(user_embedding: list[float], plant_embeddings: list[tuple[int, list[float]]]) -> list[tuple[int, float]]:
+def score_plants(
+    user_embedding: list[float],
+    plant_embeddings: list[tuple[int, list[float]]],
+) -> list[tuple[int, float]]:
     """
-    Score plants by dot product (both embeddings assumed L2-normalized).
-    plant_embeddings: [(plant_id, embedding), ...]
-    Returns: [(plant_id, score), ...] sorted by score descending.
+    Dot-product scores / ``TAU`` (embeddings assumed L2-normalized like training logits).
     """
     u = torch.tensor([user_embedding], dtype=torch.float32)
-    scores = []
+    scores: list[tuple[int, float]] = []
     for pid, p_emb in plant_embeddings:
         p = torch.tensor([p_emb], dtype=torch.float32)
         s = (u * p).sum().item() / TAU
         scores.append((pid, s))
     scores.sort(key=lambda x: x[1], reverse=True)
     return scores
+
+
+def __getattr__(name: str) -> Any:
+    """Backward-compat ``MODEL_PATH`` as Path (some callers expect module attribute)."""
+    if name == "MODEL_PATH":
+        return get_two_tower_checkpoint_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

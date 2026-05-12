@@ -20,13 +20,13 @@ WATERING_TO_BUCKET = {
     "Every 2 days": "medium",
     "Weekly": "low",
 }
-# LIGHT_VOCAB = ["direct", "bright_light", "bright_indirect", "indirect", "diffused"]
+# Canonical light labels match ``feature_engineer.ORDINAL_ORDERS["light"]`` / feature_loader.LIGHT_VOCAB.
 PLANT_LOCATION_TO_BUCKET = {
-    "Direct sunlight": "direct",
-    "Bright light": "bright_light",
-    "Bright indirect light": "bright_indirect",
-    "Medium indirect light": "indirect",
-    "Low light": "diffused",
+    "Direct sunlight": "full sun",
+    "Bright light": "full sun",
+    "Bright indirect light": "partial sun/shade",
+    "Medium indirect light": "partial sun/shade",
+    "Low light": "full shade",
 }
 # HUMIDITY_VOCAB = ["low", "medium", "high"]
 HUMIDITY_TO_BUCKET = {

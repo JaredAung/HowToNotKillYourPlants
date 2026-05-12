@@ -1,5 +1,5 @@
 """
-Profile/onboarding API. Saves user profile data to UserCollection.
+Profile/onboarding API. Saves user tower fields to UserCollection.
 Requires Authorization: Bearer <token>.
 """
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,9 +11,41 @@ from schemas import ProfileUpdate
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 
+def tower_profile_response(user: dict, username: str) -> dict:
+    """Only keys used by two-tower / ``feature_loader._mongo_user_to_flat_fe_dict``."""
+    auth = user.get("auth", {}) or {}
+    env = user.get("environment", {}) or {}
+    pref = user.get("preferences", {}) or {}
+    care_pref = pref.get("care_preferences", {}) or {}
+    constraints = user.get("constraints", {}) or {}
+    profile = user.get("profile", {}) or {}
+    return {
+        "username": auth.get("username") or username,
+        "profile": {"name": profile.get("name")},
+        "climate": user.get("climate"),
+        "usda_zone_min": user.get("usda_zone_min"),
+        "usda_zone_max": user.get("usda_zone_max"),
+        "environment": {
+            "light_level": env.get("light_level"),
+            "soil_preference": env.get("soil_preference"),
+            "temperature_pref": env.get("temperature_pref"),
+        },
+        "constraints": {
+            "preferred_size": constraints.get("preferred_size"),
+        },
+        "preferences": {
+            "care_level": pref.get("care_level"),
+            "growth_pref": pref.get("growth_pref"),
+            "care_preferences": {
+                "watering_freq": care_pref.get("watering_freq"),
+            },
+        },
+    }
+
+
 @router.get("/")
 def get_profile(username: str = Depends(get_current_username)):
-    """Return the logged-in user's full profile."""
+    """Return tower-aligned profile fields for the logged-in user."""
     collection = get_user_collection()
     user = collection.find_one({"auth.username": username}) or collection.find_one(
         {"auth.email": username.lower()}
@@ -23,30 +55,12 @@ def get_profile(username: str = Depends(get_current_username)):
             status_code=404,
             detail=f"User not found. Sign up first at /auth.",
         )
-    # Return profile data (exclude password_hash)
-    auth = user.get("auth", {}) or {}
-    profile = user.get("profile", {}) or {}
-    location = user.get("location", {}) or {}
-    environment = user.get("environment", {}) or {}
-    climate = user.get("climate")
-    safety = user.get("safety", {}) or {}
-    constraints = user.get("constraints", {}) or {}
-    preferences = user.get("preferences", {}) or {}
-    return {
-        "username": auth.get("username") or username,
-        "profile": profile,
-        "location": location,
-        "environment": environment,
-        "climate": climate,
-        "safety": safety,
-        "constraints": constraints,
-        "preferences": preferences,
-    }
+    return tower_profile_response(user, username)
 
 
 @router.post("/update")
 def update_profile(data: ProfileUpdate, username: str = Depends(get_current_username)):
-    """Update profile for the logged-in user."""
+    """Update tower profile fields for the logged-in user."""
     collection = get_user_collection()
     user = collection.find_one({"auth.username": username}) or collection.find_one(
         {"auth.email": username.lower()}
@@ -57,23 +71,19 @@ def update_profile(data: ProfileUpdate, username: str = Depends(get_current_user
             detail=f"User not found. Sign up first at /auth, or ensure username '{username}' exists.",
         )
 
+    query = (
+        {"auth.username": username}
+        if user.get("auth", {}).get("username")
+        else {"auth.email": username.lower()}
+    )
+
     update = {}
     if data.name is not None:
         update["profile.name"] = data.name
-    if data.avatar_url is not None:
-        update["profile.avatar_url"] = data.avatar_url
-    if data.city is not None:
-        update["location.city"] = data.city
-    if data.state is not None:
-        update["location.state"] = data.state
-    if data.postal_code is not None:
-        update["location.postal_code"] = data.postal_code
-    if data.country is not None:
-        update["location.country"] = data.country
     if data.light_level is not None:
         update["environment.light_level"] = data.light_level
-    if data.humidity_level is not None:
-        update["environment.humidity_level"] = data.humidity_level
+    if data.soil_preference is not None:
+        update["environment.soil_preference"] = data.soil_preference
     if data.temp_min_f is not None or data.temp_max_f is not None:
         update["environment.temperature_pref"] = {
             "min_f": data.temp_min_f,
@@ -81,28 +91,23 @@ def update_profile(data: ProfileUpdate, username: str = Depends(get_current_user
         }
     if data.climate is not None:
         update["climate"] = data.climate
-    if data.has_kids is not None:
-        update["safety.has_kids"] = data.has_kids
     if data.preferred_size is not None:
         update["constraints.preferred_size"] = data.preferred_size
-    if data.hard_no is not None:
-        update["constraints.hard_no"] = data.hard_no
     if data.care_level is not None:
         update["preferences.care_level"] = data.care_level
-    if data.watering_freq is not None or data.care_freq is not None:
+    if data.growth_pref is not None:
+        update["preferences.growth_pref"] = data.growth_pref
+    if data.usda_zone_min is not None:
+        update["usda_zone_min"] = data.usda_zone_min
+    if data.usda_zone_max is not None:
+        update["usda_zone_max"] = data.usda_zone_max
+    if data.watering_freq is not None:
         care = dict((user.get("preferences") or {}).get("care_preferences") or {})
-        if data.watering_freq is not None:
-            care["watering_freq"] = data.watering_freq
-        if data.care_freq is not None:
-            care["care_freq"] = data.care_freq
+        care["watering_freq"] = data.watering_freq
         update["preferences.care_preferences"] = care
 
     if update:
-        query = (
-            {"auth.username": username}
-            if user.get("auth", {}).get("username")
-            else {"auth.email": username.lower()}
-        )
         collection.update_one(query, {"$set": update})
 
-    return {"message": "Profile updated", "username": username}
+    refreshed = collection.find_one(query) or user
+    return {"message": "Profile updated", **tower_profile_response(refreshed, username)}

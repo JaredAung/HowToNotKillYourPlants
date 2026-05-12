@@ -24,23 +24,25 @@ EXTRACT_SCHEMA = """
 Return a JSON object with ONLY the fields you can infer from the user's text.
 Use these exact keys. Omit any field you cannot infer.
 
-Structured fields (use exact values):
-- light_level: one of "direct", "bright_light", "bright_indirect", "indirect", "diffused"
-- humidity_level: one of "low", "medium", "high"
+Structured fields (same vocabulary as the recommendation model / onboarding):
+- light_level: one of "full shade", "partial sun/shade", "full sun" (same scale as plant lighting ordinals)
+- soil_preference: one of "light", "medium", "heavy"
+- growth_pref: one of "slow", "med", "fast"
 - temp_min_f: number (Fahrenheit)
 - temp_max_f: number (Fahrenheit)
-- climate: one of "Arid Tropical", "Subtropical", "Subtropical arid", "Tropical", "Tropical humid"
+- climate: one of "alpine", "arid", "mediterranean", "temperate", "tropical"
 - preferred_size: one of "small", "medium", "large"
 - care_level: one of "easy", "medium", "hard"
 - watering_freq: one of "low", "medium", "high"
-- care_freq: one of "low", "medium", "high"
+- usda_zone_min: integer 1-13 (optional)
+- usda_zone_max: integer 1-13 (optional)
 
 Free-text fields (user describing what kind of plant they want):
-- physical_desc: string - appearance, shape, foliage, color, texture (e.g. "tall palm with elegant fronds", "glossy heart-shaped leaves")
-- symbolism: string - meaning, vibe, feeling (e.g. "peace and tranquility", "good luck and prosperity")
+- physical_desc: string - appearance, shape, foliage, color, texture
+- symbolism: string - meaning, vibe, feeling
 
 Example: {"physical_desc": "tall palm with feathery fronds", "symbolism": "peace and balance"}
-Example: {"light_level": "bright_indirect", "physical_desc": "trailing vine with heart-shaped leaves"}
+Example: {"light_level": "partial sun/shade", "physical_desc": "trailing vine with heart-shaped leaves"}
 Return ONLY valid JSON, no markdown or extra text.
 """
 
@@ -55,11 +57,10 @@ def _get_user_profile(username: str) -> dict:
         raise HTTPException(status_code=404, detail="User not found")
     return {
         "username": (user.get("auth") or {}).get("username") or username,
-        "profile": user.get("profile") or {},
-        "location": user.get("location") or {},
-        "environment": user.get("environment") or {},
         "climate": user.get("climate"),
-        "safety": user.get("safety") or {},
+        "usda_zone_min": user.get("usda_zone_min"),
+        "usda_zone_max": user.get("usda_zone_max"),
+        "environment": user.get("environment") or {},
         "constraints": user.get("constraints") or {},
         "preferences": user.get("preferences") or {},
     }
@@ -96,8 +97,8 @@ def _merge_profile(existing: dict, extracted: dict) -> dict:
 
     if extracted.get("light_level") is not None:
         env["light_level"] = extracted["light_level"]
-    if extracted.get("humidity_level") is not None:
-        env["humidity_level"] = extracted["humidity_level"]
+    if extracted.get("soil_preference") is not None:
+        env["soil_preference"] = extracted["soil_preference"]
     if extracted.get("temp_min_f") is not None:
         temp["min_f"] = float(extracted["temp_min_f"])
     if extracted.get("temp_max_f") is not None:
@@ -107,14 +108,24 @@ def _merge_profile(existing: dict, extracted: dict) -> dict:
 
     if extracted.get("climate") is not None:
         result["climate"] = extracted["climate"]
+    if extracted.get("usda_zone_min") is not None:
+        try:
+            result["usda_zone_min"] = int(round(float(extracted["usda_zone_min"])))
+        except (TypeError, ValueError):
+            pass
+    if extracted.get("usda_zone_max") is not None:
+        try:
+            result["usda_zone_max"] = int(round(float(extracted["usda_zone_max"])))
+        except (TypeError, ValueError):
+            pass
     if extracted.get("preferred_size") is not None:
         constraints["preferred_size"] = extracted["preferred_size"]
     if extracted.get("care_level") is not None:
         pref["care_level"] = extracted["care_level"]
+    if extracted.get("growth_pref") is not None:
+        pref["growth_pref"] = extracted["growth_pref"]
     if extracted.get("watering_freq") is not None:
         care_pref["watering_freq"] = extracted["watering_freq"]
-    if extracted.get("care_freq") is not None:
-        care_pref["care_freq"] = extracted["care_freq"]
 
     if extracted.get("physical_desc") is not None and str(extracted["physical_desc"]).strip():
         result["physical_desc"] = str(extracted["physical_desc"]).strip()

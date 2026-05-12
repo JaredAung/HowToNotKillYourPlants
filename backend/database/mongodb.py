@@ -1,7 +1,6 @@
 """
 Shared MongoDB connection and collection access.
-Uses env vars: MONGO_URI, MONGO_DATABASE, MONGO_USER_PROFILES_COLLECTION,
-NEW_PLANT_COLLECTION (preferred), or PLANT_MONGO_COLLECTION (legacy fallback).
+Plant catalog: ``NEW_PLANT_COLLECTION`` (default ``NewPlantCollection``).
 """
 import os
 
@@ -12,9 +11,7 @@ from pymongo.database import Database
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DATABASE = os.getenv("MONGO_DATABASE", "HowNotToKillYourPlants")
 USER_COLLECTION = os.getenv("MONGO_USER_PROFILES_COLLECTION", "UserCollection")
-PLANT_COLLECTION = os.getenv("NEW_PLANT_COLLECTION") or os.getenv(
-    "PLANT_MONGO_COLLECTION", "NewPlantCollection"
-)
+PLANT_COLLECTION = os.getenv("NEW_PLANT_COLLECTION", "NewPlantCollection")
 GARDEN_COLLECTION = os.getenv("MONGO_USER_GARDEN_COLLECTION", "User_Garden_Collection")
 DEATH_COLLECTION = os.getenv("PLANT_DEATH_COLLECTION", "PlantDeathCollection")
 TOKEN_BLACKLIST_COLLECTION = os.getenv("MONGO_TOKEN_BLACKLIST_COLLECTION", "TokenBlacklist")

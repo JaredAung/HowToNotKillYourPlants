@@ -18,11 +18,32 @@ for _p in _env_paths:
         load_dotenv(_p, override=True)
         break
 
+
+def _sync_langsmith_env() -> None:
+    """
+    LangChain / LangGraph read LANGCHAIN_* for tracing. LangSmith UI often shows LANGSMITH_*;
+    map them here so either style works. Tracing runs only when a key is present and tracing on.
+    """
+    key = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
+    if key and not os.getenv("LANGCHAIN_API_KEY"):
+        os.environ["LANGCHAIN_API_KEY"] = key
+    project = os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT")
+    if project and not os.getenv("LANGCHAIN_PROJECT"):
+        os.environ["LANGCHAIN_PROJECT"] = project
+    tracing = os.getenv("LANGCHAIN_TRACING_V2", "").lower() in ("true", "1", "yes")
+    tracing = tracing or os.getenv("LANGSMITH_TRACING", "").lower() in ("true", "1", "yes")
+    if tracing:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+
+
+_sync_langsmith_env()
+
 from auth.auth import router as auth_router
 from chat.chat_router import router as chat_router
 from garden.garden import router as garden_router
 from plant.plant import router as plant_router
 from profile.profile import router as profile_router
+from recommend.feature_loader import get_two_tower_checkpoint_path
 from recommend.recommend import router as recommend_router
 from search.search import router as search_router
 
@@ -52,9 +73,6 @@ def read_root():
     return {"message": "Hello from FastAPI"}
 
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "resources" / "two_tower_training" / "output" / "two_tower.pt"
-
-
 @app.get("/health")
 def health_check():
     """Critical health check: MongoDB + model file. Returns 503 if any dependency is down."""
@@ -67,9 +85,13 @@ def health_check():
     except Exception as e:
         errors.append(f"MongoDB: {e!s}")
 
-    # Model file
-    if not MODEL_PATH.exists():
-        errors.append("Model not loaded (two_tower.pt missing; run dvc pull)")
+    # Two-tower checkpoint (same resolution as recommend.feature_loader)
+    model_path = get_two_tower_checkpoint_path()
+    if not model_path.is_file():
+        errors.append(
+            f"Model not loaded ({model_path.name} missing at {model_path.parent}; "
+            "set TWO_TOWER_MODEL_PATH or run training / dvc pull)"
+        )
 
     if errors:
         return JSONResponse(

@@ -83,7 +83,7 @@ Recommendations are based on **real user conditions**, including:
 
 ### 🔄 Continuous Learning Pipeline
 
-The model **retrains on real user data** — garden plants, deaths, and synthetic interactions — via a **Prefect-orchestrated pipeline** that runs on a schedule. Real interactions are weighted higher; each retrain incorporates the latest failures and successes.
+The model **retrains on synthetic and real signals** — garden plants, deaths (as negatives), and synthetic interactions — when you run the training script. Refresh interaction exports / Feast materialization as needed, then train and version artifacts with DVC.
 
 ### 📦 DVC Model Versioning
 
@@ -114,11 +114,10 @@ flowchart TD
     FastAPI --> TwoTower[Two-Tower Model]
     TwoTower --> MongoVec[(MongoDB Vector Search)]
     MongoVec --> Cohere[Cohere Reranker]
-    Cohere --> DeathPenalty[Death Penalty]
-    DeathPenalty --> Results[Final Recommendations]
+    Cohere --> Results[Final Recommendations]
 ```
 
-**Component flow:** User → Next.js frontend → FastAPI backend → Two-Tower model (user embedding) → MongoDB vector search (plant embeddings) → Cohere semantic reranker → death penalty → ranked results.
+**Component flow:** User → Next.js frontend → FastAPI backend → Two-Tower model (user embedding) → MongoDB vector search (plant embeddings) → Cohere semantic reranker → ranked results.
 
 ---
 
@@ -216,17 +215,9 @@ This improves ranking quality beyond structured matching.
 
 ---
 
-## 3️⃣ Failure-Aware Learning (Death Penalty)
+## 3️⃣ Failure-Aware Learning
 
-If a plant dies, the system **learns from that failure** — for now, via a **temporary runtime penalty**.
-
-Plants similar to previously dead plants receive a **score penalty**:
-
-```
-final_score = base_score − λ × similarity_to_dead_plants
-```
-
-λ controls how strongly past failures affect ranking. This prevents recommending plants that **historically failed for the user**. The penalty is **temporary**: it applies only until the next scheduled retrain, when the model is updated with the latest interaction data and learns failures directly in its weights.
+If a plant dies, that signal is stored and can feed **the next training run** as a negative example (alongside garden positives and synthetic data). Recommendations at request time use vector retrieval and optional reranking only — there is **no separate runtime death-penalty term** on scores.
 
 ---
 
@@ -242,19 +233,18 @@ User --> Garden[(Garden)]
 Garden --> PlantDies[Plant dies]
 PlantDies --> DeathReport[Death Report Form]
 DeathReport --> DeathDB[(PlantDeathCollection)]
-DeathDB --> Penalty[Death Penalty in Recommendations]
-Penalty --> AvoidSimilar[Avoid similar plants]
-AvoidSimilar --> BetterRecs[Better recommendations]
+DeathDB --> Retrain[Retrain pipeline]
+Retrain --> BetterRecs[Better recommendations after model update]
 BetterRecs --> User
 ```
 
-**How it works:** Death reports are stored in `PlantDeathCollection`. Until the next retrain, the **death penalty** (section 3 above) down-ranks plants similar to those that died. After retraining, the model itself encodes these failures — the penalty remains as a safeguard, but the model has already learned to avoid them.
+**How it works:** Death reports are stored in `PlantDeathCollection` and used as **negative training signals** when the two-tower model is retrained, so the learned embeddings reflect failures over time. There is no separate runtime “death penalty” in the recommend API.
 
 ---
 
 # 🔄 Automated Retraining Pipeline
 
-The system improves over time by **retraining on real user data**. The pipeline is orchestrated with **Prefect** and can run on a schedule (e.g. nightly).
+The system improves over time by **retraining** when you rebuild interactions/features and run the training script (manually, via cron, or any orchestrator you prefer).
 
 ```mermaid
 flowchart TD
@@ -270,8 +260,8 @@ flowchart TD
         Split --> TrainLoop[Train Two-Tower Model]
         TrainLoop --> DeathEval[Death Feedback Eval]
         DeathEval --> Embed[Compute Plant Embeddings]
-        Embed --> Save[Save two_tower.pt, retrain_metrics.txt]
-        Save --> MongoUpdate[Update MongoDB PlantCollection]
+        Embed --> Save[Save two_tower.pt]
+        Save --> MongoUpdate[Update MongoDB NewPlantCollection]
         Save --> DVCAdd1[dvc add model + metrics]
     end
 
@@ -287,9 +277,9 @@ flowchart TD
     end
 ```
 
-**Flow (Prefect):** `retrain` → `eval` (`python -m resources.two_tower_training.eval` → `two_tower_eval.json`) → `dvc add` → `dvc push`. Run with `python -m backend.recommend.retrain.prefect_flow --dvc-push` or schedule via Prefect deploy.
+**Typical flow:** train (`python resources/two_tower_training/training_script.py`) → optional eval (`python resources/two_tower_training/eval.py`) → `dvc add` / `dvc push` for artifacts under `resources/two_tower_training/output/`.
 
-**Death penalty vs retraining:** The death penalty is a **short-term** fix until the next retrain. Once retraining runs with the latest garden and death data, the model learns failures directly; the penalty continues to provide an extra safety margin.
+**Deaths and retraining:** Retraining incorporates garden and death data so the model learns from real failures; recommendations at request time use vector search and optional reranking only.
 
 ---
 
@@ -646,7 +636,6 @@ MONGO_USER_PROFILES_COLLECTION=UserCollection
 MONGO_USER_GARDEN_COLLECTION=User_Garden_Collection
 PLANT_DEATH_COLLECTION=PlantDeathCollection
 NEW_PLANT_COLLECTION=NewPlantCollection
-# Legacy: PLANT_MONGO_COLLECTION used only if NEW_PLANT_COLLECTION is unset
 
 # ML & APIs
 VOYAGE_API_KEY=...
@@ -656,8 +645,6 @@ VECTOR_SEARCH_INDEX=vector_index
 
 # Optional
 USE_RERANK=true
-USE_DEATH_PENALTY=true
-DEATH_PENALTY_LAMBDA=0.5
 NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # LLM (chat assistant): USE_GEMINI=true (default) or false for Ollama
@@ -691,26 +678,22 @@ pip install -r requirements.txt
 
 ## Train the Model
 
-**Initial training** (synthetic data only):
+From the repo root:
 
 ```bash
-python resources/two_tower_training/two_tower_training.py
+python resources/two_tower_training/training_script.py
 ```
 
-**Retrain** (synthetic + real garden/death data from MongoDB, recommended):
+Use **`resources/two_tower_training/synthetic_interactions.json`** (and Feast / feature materialization as configured in `training_script.py`) as training inputs. For the old Mongo-merge + weighted retrain helper, restore **`backend/recommend/retrain/`** from git history.
 
-```bash
-python -m backend.recommend.retrain.retrain_two_tower
-```
+**Artifacts**
 
-Outputs:
-
-* `two_tower.pt`
-* `plant_embeddings.json` (regenerated from model)
+* **Checkpoint:** `resources/two_tower_training/two_tower.pt` (dict with `model_state`, `epoch`, `val_metrics`).
+* **Metrics / runs:** optional **MLflow** logging when `MLFLOW_TRACKING_URI` is set (`./mlruns` by default).
 
 ### Model versioning with DVC
 
-Model weights (`two_tower.pt`) and metrics (`retrain_metrics.txt`) are tracked with [DVC](https://dvc.org/) and stored in [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH). `plant_embeddings.json` is regenerated from the model.
+Track **`two_tower.pt`** (and any other artifacts you rely on) with [DVC](https://dvc.org/). Remote Storage may point at [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH) depending on your `.dvc/config`.
 
 **Setup** (one-time):
 
@@ -735,8 +718,9 @@ pip install "dvc[gdrive]"
 **After retraining** (to version the new model):
 
 ```bash
-python -m backend.recommend.retrain.retrain_two_tower --dvc-add
-git add resources/two_tower_training/output/*.dvc
+python resources/two_tower_training/training_script.py
+dvc add resources/two_tower_training/two_tower.pt
+git add resources/two_tower_training/two_tower.pt.dvc
 git commit -m "Update model"
 dvc push
 ```
@@ -751,22 +735,13 @@ dvc pull
 
 | What | Path |
 |------|------|
-| Model | `resources/two_tower_training/output/two_tower.pt` |
-| Metrics | `resources/two_tower_training/output/retrain_metrics.txt` |
-| Offline eval (two-tower + optional semantic baseline) | `resources/two_tower_training/output/two_tower_eval.json` |
+| Model checkpoint | `resources/two_tower_training/two_tower.pt` |
+| Offline eval JSON (when you run `eval.py`) | `resources/two_tower_training/output/two_tower_eval.json` |
 | Synthetic interactions | `resources/two_tower_training/synthetic_interactions.json` (see `synthetic_interactions.json.dvc`) |
-| DVC pointers | `*.dvc` under `resources/two_tower_training/` and `output/` |
-| Plant embeddings | `resources/two_tower_training/output/plant_embeddings.json` |
+| DVC pointers | `*.dvc` under `resources/two_tower_training/` (and legacy `output/` if present) |
 | Drive folder | [Google Drive](https://drive.google.com/drive/folders/1B3K2Tj_CKREKAbNBe7Iih8vlB19ZUQGH) |
 
-**Prefect flow** (optional scheduling):
-
-```bash
-pip install prefect
-python -m backend.recommend.retrain.prefect_flow
-python -m backend.recommend.retrain.prefect_flow --dvc-push   # retrain + push to Drive
-python -m backend.recommend.retrain.prefect_flow --no-use-eval  # skip offline eval JSON export
-```
+**Scheduling:** Wrap the commands above in **cron**, **GitHub Actions**, or **Prefect** (install Prefect separately if you want flows; this repo no longer ships `backend/recommend/retrain/`).
 
 ---
 

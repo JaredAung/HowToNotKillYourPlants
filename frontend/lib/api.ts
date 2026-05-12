@@ -1,4 +1,13 @@
+import type { PlantRec } from "@/app/components/PlantCard";
+import {
+  coercePlantRec,
+  normalizeRecommendationsResponse,
+  type RecommendationsResponse,
+} from "@/lib/recommendations";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export type { RecommendationsResponse };
 
 const TOKEN_KEY = "auth_token";
 
@@ -76,30 +85,36 @@ export async function getMe() {
   return res.json();
 }
 
-const HOME_REC_CACHE_KEY = "homeRecommendationsCache";
+const HOME_REC_CACHE_KEY = "homeRecommendationsCache.v4";
 
-function getCachedRecommendations(): Record<string, unknown> | null {
+function getCachedRecommendations(): RecommendationsResponse | null {
   if (typeof window === "undefined") return null;
   try {
     const stored = sessionStorage.getItem(HOME_REC_CACHE_KEY);
     if (!stored) return null;
-    const parsed = JSON.parse(stored) as Record<string, unknown>;
-    const plants = parsed?.plants as unknown[] | undefined;
-    if (!plants || plants.length === 0) return null;
-    return parsed;
+    const normalized = normalizeRecommendationsResponse(JSON.parse(stored) as unknown);
+    const hasGrid = normalized.plants.length > 0;
+    const hasTop = (normalized.top_recommended?.length ?? 0) > 0;
+    if (!hasGrid && !hasTop) return null;
+    return normalized;
   } catch {
     sessionStorage.removeItem(HOME_REC_CACHE_KEY);
     return null;
   }
 }
 
-function setCachedRecommendations(data: Record<string, unknown>) {
+function setCachedRecommendations(data: RecommendationsResponse) {
   if (typeof window === "undefined") return;
   try {
     sessionStorage.setItem(HOME_REC_CACHE_KEY, JSON.stringify(data));
   } catch {
     sessionStorage.removeItem(HOME_REC_CACHE_KEY);
   }
+}
+
+/** Persist home recommendations (e.g. after appending explore pages) for session refresh. */
+export function cacheHomeRecommendations(data: RecommendationsResponse) {
+  setCachedRecommendations(data);
 }
 
 export function clearRecommendationsCache() {
@@ -126,6 +141,7 @@ export async function getRecommendations(options?: {
   const params = new URLSearchParams();
   if (options?.k !== undefined) params.set("k", String(options.k));
   if (options?.use_rerank === false) params.set("use_rerank", "false");
+  if (options?.forceRefresh) params.set("refresh", "true");
   const qs = params.toString();
   const url = `${API_BASE}/recommend/${qs ? `?${qs}` : ""}`;
   const res = await fetch(url, {
@@ -140,9 +156,71 @@ export async function getRecommendations(options?: {
     const msg = Array.isArray(err.detail) ? err.detail : err.detail;
     throw new Error(typeof msg === "string" ? msg : "Failed to load recommendations");
   }
-  const data = (await res.json()) as Record<string, unknown>;
+  const raw = await res.json();
+  if (process.env.NODE_ENV === "development") {
+    console.log("[getRecommendations] raw API JSON (first 5000 chars):", JSON.stringify(raw).slice(0, 5000));
+    const plantsRaw = (raw as Record<string, unknown>)?.plants;
+    if (Array.isArray(plantsRaw)) {
+      console.table(
+        plantsRaw.slice(0, 25).map((p: Record<string, unknown>) => ({
+          plant_id: p?.plant_id,
+          img_url: p?.img_url != null ? String(p.img_url).slice(0, 80) : null,
+          common_name: p?.common_name,
+          latin: p?.latin,
+        })),
+      );
+    }
+  }
+  const data = normalizeRecommendationsResponse(raw);
+  if (process.env.NODE_ENV === "development") {
+    console.table(
+      data.plants.slice(0, 25).map((p) => ({
+        plant_id: p.plant_id,
+        img_url: p.img_url != null ? p.img_url.slice(0, 80) : null,
+        common_name: p.common_name,
+        latin: p.latin,
+      })),
+    );
+  }
   setCachedRecommendations(data);
   return data;
+}
+
+export type ExploreMoreResponse = { plants: PlantRec[]; has_more: boolean };
+
+/** Next page of explore plants from the Redis deck (offset = current ``plants.length``). */
+export async function getRecommendationsExplore(
+  offset: number,
+  limit = 20,
+): Promise<ExploreMoreResponse> {
+  const token = getToken();
+  if (!token) throw new Error("Not logged in");
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+  });
+  const res = await fetch(`${API_BASE}/recommend/explore?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      throw new Error("Session expired");
+    }
+    const err = await res.json().catch(() => ({}));
+    const detail = err?.detail;
+    const msg = typeof detail === "string" ? detail : "Could not load more plants";
+    throw new Error(msg);
+  }
+  const raw = (await res.json()) as { plants?: unknown[]; has_more?: boolean };
+  const plants: PlantRec[] = [];
+  if (Array.isArray(raw.plants)) {
+    for (const item of raw.plants) {
+      const c = coercePlantRec(item);
+      if (c) plants.push(c);
+    }
+  }
+  return { plants, has_more: Boolean(raw.has_more) };
 }
 
 export async function getExplanation(plantIds: number[]) {

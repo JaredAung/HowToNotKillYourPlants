@@ -15,19 +15,19 @@ const SEARCH_SEMANTIC_PLANTS_KEY = "searchSemanticPlants";
 
 type ProfileData = {
   username: string;
-  profile: { name?: string; avatar_url?: string };
-  location: { city?: string; state?: string; postal_code?: string; country?: string };
-  environment: {
-    light_level?: string;
-    humidity_level?: string;
-    temperature_pref?: { min_f?: number; max_f?: number };
+  climate?: string | null;
+  usda_zone_min?: number | null;
+  usda_zone_max?: number | null;
+  environment?: {
+    light_level?: string | null;
+    soil_preference?: string | null;
+    temperature_pref?: { min_f?: number | null; max_f?: number | null };
   };
-  climate?: string;
-  safety: { has_kids?: boolean };
-  constraints: { preferred_size?: string; hard_no?: string[] };
-  preferences: {
-    care_level?: string;
-    care_preferences?: { watering_freq?: string; care_freq?: string };
+  constraints?: { preferred_size?: string | null };
+  preferences?: {
+    care_level?: string | null;
+    growth_pref?: string | null;
+    care_preferences?: { watering_freq?: string | null };
   };
   physical_desc?: string;
   symbolism?: string;
@@ -122,44 +122,38 @@ export default function SearchResultsPage() {
     );
   }
 
-  const { profile: p, location, environment, climate, safety, constraints, preferences, physical_desc, symbolism } = profile;
+  const { environment, climate, constraints, preferences, physical_desc, symbolism } = profile;
   const tempPref = environment?.temperature_pref;
   const carePref = preferences?.care_preferences;
 
   const sections: { title: string; items: [string, string | undefined | null][] }[] = [
     {
-      title: "Profile",
+      title: "Climate & zones",
       items: [
-        ["Name", p?.name],
-        ["Avatar URL", p?.avatar_url],
-      ],
-    },
-    {
-      title: "Location",
-      items: [
-        ["City", location?.city],
-        ["State", location?.state],
-        ["Postal code", location?.postal_code],
-        ["Country", location?.country],
+        ["Climate", climate ?? undefined],
+        [
+          "USDA zones",
+          profile.usda_zone_min != null && profile.usda_zone_max != null
+            ? `${profile.usda_zone_min}–${profile.usda_zone_max}`
+            : undefined,
+        ],
       ],
     },
     {
       title: "Environment",
       items: [
         ["Light level", environment?.light_level ? formatLabel(environment.light_level) : undefined],
-        ["Humidity level", environment?.humidity_level ? formatLabel(environment.humidity_level) : undefined],
-        ["Temp range", tempPref?.min_f != null && tempPref?.max_f != null ? `${tempPref.min_f}–${tempPref.max_f}°F` : undefined],
+        ["Soil preference", environment?.soil_preference ? formatLabel(environment.soil_preference) : undefined],
+        ["Temp range °F", tempPref?.min_f != null && tempPref?.max_f != null ? `${tempPref.min_f}–${tempPref.max_f}` : undefined],
       ],
     },
     {
-      title: "Other",
+      title: "Preferences",
       items: [
-        ["Climate", climate],
-        ["Has kids", safety?.has_kids != null ? (safety.has_kids ? "Yes" : "No") : undefined],
         ["Preferred size", constraints?.preferred_size ? formatLabel(constraints.preferred_size) : undefined],
         ["Care level", preferences?.care_level ? formatLabel(preferences.care_level) : undefined],
-        ["Watering freq", carePref?.watering_freq ? formatLabel(carePref.watering_freq) : undefined],
-        ["Care freq", carePref?.care_freq ? formatLabel(carePref.care_freq) : undefined],
+        ["Growth preference", preferences?.growth_pref ? formatLabel(preferences.growth_pref) : undefined],
+        ["Watering", carePref?.watering_freq ? formatLabel(carePref.watering_freq) : undefined],
       ],
     },
     {
@@ -182,23 +176,7 @@ export default function SearchResultsPage() {
         </div>
 
         <div className="rounded-xl border border-sage-200 bg-white shadow-leaf p-6 space-y-6">
-          <div className="flex items-center gap-4 pb-4 border-b border-sage-200">
-            {p?.avatar_url ? (
-              <img
-                src={p.avatar_url}
-                alt={p?.name || profile.username}
-                className="h-16 w-16 rounded-full object-cover"
-              />
-            ) : (
-              <div className="h-16 w-16 rounded-full bg-sage-200 flex items-center justify-center text-2xl">
-                🌱
-              </div>
-            )}
-            <div>
-              <p className="font-semibold text-forest-800">{p?.name || "—"}</p>
-              <p className="text-sm text-forest-600">@{profile.username}</p>
-            </div>
-          </div>
+          <p className="text-forest-800 font-medium pb-4 border-b border-sage-200">@{profile.username}</p>
 
           {sections.map(({ title, items }) => {
             const filtered = items.filter(([, v]) => v != null && v !== "");
@@ -260,15 +238,10 @@ export default function SearchResultsPage() {
             )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {plants.map((p) => {
-                const matchPct =
-                  p.rerank_score != null
-                    ? Math.round(p.rerank_score * 100)
-                    : Math.round(((plants[0]?.score ?? 1) > 0 ? p.score / (plants[0]?.score ?? 1) : 0) * 100);
                 return (
                   <PlantCard
                     key={p.plant_id}
                     p={p}
-                    matchPct={matchPct}
                     isJustAdded={addSuccessPlantId === p.plant_id}
                     onAdd={async (plant) => {
                       try {
@@ -301,8 +274,6 @@ export default function SearchResultsPage() {
                   <PlantCard
                     key={p.plant_id}
                     p={p}
-                    matchPct={0}
-                    showMatchPct={false}
                     isJustAdded={addSuccessPlantId === p.plant_id}
                     onAdd={async (plant) => {
                       try {
